@@ -1,0 +1,317 @@
+local Players=game:GetService("Players")
+local Workspace=game:GetService("Workspace")
+local TweenService=game:GetService("TweenService")
+local UserInputService=game:GetService("UserInputService")
+local CollectionService=game:GetService("CollectionService")
+local HttpService=game:GetService("HttpService")
+local RunService=game:GetService("RunService")
+local SoundService=game:GetService("SoundService")
+local player=Players.LocalPlayer
+
+local SETTING_FILE="NuluxSettings.json"
+local USER_FILE="NuluxUser.json"
+local defaultSettings={reachOn=false,visOn=false,reachX=30,reachY=30,reachZ=30,offsetX=0,offsetY=0,offsetZ=0,predOn=false,lineThick=1.5,advPred=false,infStamOn=false,alwaysSprintOn=false,antiRagdollOn=false,autoCatchOn=false,autoGKReactOn=false,noGKCooldownOn=false,diveDist=120,powershotOn=false,infShotChargeOn=false,autoTopBinsOn=false,bringBallOn=false,autoGoalFixed=false,theme={Accent={44,77,220},Background={20,22,40},Panel={24,23,32},PanelActive={34,35,68},Text={230,240,255}}}
+local settings=defaultSettings
+
+pcall(function()if isfile and isfile(SETTING_FILE)then settings=HttpService:JSONDecode(readfile(SETTING_FILE))end end)
+pcall(function()if isfile and isfile(USER_FILE)then savedUser=HttpService:JSONDecode(readfile(USER_FILE))end end)
+
+local function saveSettings()pcall(function()if writefile then writefile(SETTING_FILE,HttpService:JSONEncode(settings))end end)end
+local function saveUser(userId)pcall(function()if writefile then writefile(USER_FILE,HttpService:JSONEncode({userId=userId}))end end)end
+
+local assets={triangle="rbxassetid://6052190701",user="rbxassetid://6031068438",lock="rbxassetid://3926305904",forgot="rbxassetid://6031094674",reach="rbxassetid://13733615125",gk="rbxassetid://8931212250",ball="rbxassetid://8931212334",pred="rbxassetid://8931212277",player="rbxassetid://6052190740",close="rbxassetid://6023426926",spark="rbxassetid://6034996690"}
+
+local gui=Instance.new("ScreenGui")
+gui.ResetOnSpawn=false
+gui.Parent=player:WaitForChild("PlayerGui")
+
+local Background=Instance.new("ImageLabel",gui)
+Background.Size=UDim2.fromScale(1,1)
+Background.BackgroundTransparency=1
+Background.Image="rbxassetid://14208878714"
+
+local LoginFrame=Instance.new("Frame",gui)
+LoginFrame.Size=UDim2.fromOffset(440,360)
+LoginFrame.Position=UDim2.fromScale(0.5,0.5)
+LoginFrame.AnchorPoint=Vector2.new(0.5,0.5)
+LoginFrame.BackgroundColor3=Color3.fromRGB(20,22,40)
+LoginFrame.BackgroundTransparency=0.35
+LoginFrame.BorderSizePixel=0
+Instance.new("UICorner",LoginFrame).CornerRadius=UDim.new(0,24)
+Instance.new("UIGradient",LoginFrame).Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(30,32,55)),ColorSequenceKeypoint.new(1,Color3.fromRGB(15,17,35))}
+local ls=Instance.new("UIStroke",LoginFrame)ls.Thickness=2 ls.Color=Color3.fromRGB(70,110,255)ls.Transparency=0.6
+
+spawn(function()while LoginFrame do TweenService:Create(ls,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{Transparency=0.3}):Play()wait()end end)
+
+local TopTriangle=Instance.new("ImageLabel",LoginFrame)
+TopTriangle.Image=assets.triangle
+TopTriangle.Size=UDim2.fromOffset(44,44)
+TopTriangle.Position=UDim2.new(0.5,-22,0,18)
+TopTriangle.BackgroundTransparency=1
+TopTriangle.ImageColor3=Color3.fromRGB(100,160,255)
+TweenService:Create(TopTriangle,TweenInfo.new(3,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{Rotation=360}):Play()
+
+local UserIcon=Instance.new("ImageLabel",LoginFrame)UserIcon.Image=assets.user UserIcon.Size=UDim2.fromOffset(32,32)UserIcon.Position=UDim2.new(0,65,0,95)UserIcon.BackgroundTransparency=1
+local UsernameBox=Instance.new("TextBox",LoginFrame)
+UsernameBox.PlaceholderText="Username"
+UsernameBox.Text=player.Name
+UsernameBox.Size=UDim2.new(0.68,0,0,48)
+UsernameBox.Position=UDim2.new(0,110,0,92)
+UsernameBox.BackgroundTransparency=1
+UsernameBox.TextColor3=Color3.fromRGB(230,240,255)
+UsernameBox.PlaceholderColor3=Color3.fromRGB(130,140,180)
+UsernameBox.Font=Enum.Font.GothamSemibold
+UsernameBox.TextSize=23
+UsernameBox.TextXAlignment=Enum.TextXAlignment.Left
+
+local UserLine=Instance.new("Frame",LoginFrame)
+UserLine.Size=UDim2.new(0.73,0,0,3)
+UserLine.Position=UDim2.new(0.135,0,0,145)
+UserLine.BackgroundColor3=Color3.fromRGB(80,120,220)
+Instance.new("UIGradient",UserLine).Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(44,77,220)),ColorSequenceKeypoint.new(1,Color3.fromRGB(100,160,255))}
+
+local KeyIcon=Instance.new("ImageLabel",LoginFrame)KeyIcon.Image=assets.lock KeyIcon.Size=UDim2.fromOffset(32,32)KeyIcon.Position=UDim2.new(0,65,0,165)KeyIcon.BackgroundTransparency=1
+local KeyBox=Instance.new("TextBox",LoginFrame)
+KeyBox.PlaceholderText="Key"
+KeyBox.Text=""
+KeyBox.Size=UDim2.new(0.68,0,0,48)
+KeyBox.Position=UDim2.new(0,110,0,162)
+KeyBox.BackgroundTransparency=1
+KeyBox.TextColor3=Color3.fromRGB(230,240,255)
+KeyBox.PlaceholderColor3=Color3.fromRGB(130,140,180)
+KeyBox.Font=Enum.Font.GothamSemibold
+KeyBox.TextSize=23
+KeyBox.TextXAlignment=Enum.TextXAlignment.Left
+
+local KeyLine=Instance.new("Frame",LoginFrame)
+KeyLine.Size=UDim2.new(0.73,0,0,3)
+KeyLine.Position=UDim2.new(0.135,0,0,215)
+KeyLine.BackgroundColor3=Color3.fromRGB(80,120,220)
+Instance.new("UIGradient",KeyLine).Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(44,77,220)),ColorSequenceKeypoint.new(1,Color3.fromRGB(100,160,255))}
+
+local LoginBtn=Instance.new("TextButton",LoginFrame)
+LoginBtn.Size=UDim2.new(0.65,0,0,56)
+LoginBtn.Position=UDim2.new(0.175,0,0.65,0)
+LoginBtn.BackgroundColor3=Color3.fromRGB(44,77,220)
+LoginBtn.Text="Login"
+LoginBtn.TextColor3=Color3.new(1,1,1)
+LoginBtn.Font=Enum.Font.GothamBold
+LoginBtn.TextSize=26
+Instance.new("UICorner",LoginBtn).CornerRadius=UDim.new(0,14)
+Instance.new("UIGradient",LoginBtn).Rotation=90 Instance.new("UIGradient",LoginBtn).Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(60,100,255)),ColorSequenceKeypoint.new(1,Color3.fromRGB(30,60,200))}
+
+LoginBtn.MouseEnter:Connect(function()TweenService:Create(LoginBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(70,110,255)}):Play()end)
+LoginBtn.MouseLeave:Connect(function()TweenService:Create(LoginBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(44,77,220)}):Play()end)
+local clickSound=Instance.new("Sound",LoginBtn)clickSound.SoundId="rbxassetid://1073297611"clickSound.Volume=0.6
+
+local ForgotBtn=Instance.new("TextButton",LoginFrame)
+ForgotBtn.Text="Forgot Key"
+ForgotBtn.BackgroundTransparency=1
+ForgotBtn.Size=UDim2.new(0.5,0,0,34)
+ForgotBtn.Position=UDim2.new(0.25,0,0.85,0)
+ForgotBtn.TextColor3=Color3.fromRGB(140,170,255)
+ForgotBtn.Font=Enum.Font.Gotham
+ForgotBtn.TextSize=19
+ForgotBtn.MouseButton1Click:Connect(function()ForgotBtn.Text="Contact Discord: nulux.gg"task.wait(2)ForgotBtn.Text="Forgot Key"end)
+
+local Sidebar=Instance.new("Frame",gui)
+Sidebar.Size=UDim2.new(0,60,0,320)
+Sidebar.Position=UDim2.new(0,18,0,40)
+Sidebar.BackgroundColor3=Color3.fromRGB(24,23,32)
+Sidebar.Visible=false
+Instance.new("UICorner",Sidebar).CornerRadius=UDim.new(0,18)
+local ss=Instance.new("UIStroke",Sidebar)ss.Color=Color3.fromRGB(44,77,220)ss.Transparency=0.5
+
+local sidebarBtns={{assets.reach,"Reach"},{assets.gk,"GK"},{assets.pred,"Predictor"},{assets.ball,"Ball"},{assets.player,"Local"}}
+local sidebarBtnObjs={}
+
+for idx,info in ipairs(sidebarBtns)do
+local sBtn=Instance.new("TextButton",Sidebar)
+sBtn.BackgroundColor3=idx==1 and Color3.fromRGB(unpack(settings.theme.PanelActive))or Color3.fromRGB(unpack(settings.theme.Panel))
+sBtn.Size=UDim2.new(1,0,0,54)
+sBtn.Position=UDim2.new(0,0,0,(idx-1)*59)
+sBtn.Text=""
+Instance.new("UICorner",sBtn).CornerRadius=UDim.new(0,15)
+local icon=Instance.new("ImageLabel",sBtn)
+icon.Image=info[1]icon.Size=UDim2.fromOffset(28,28)icon.Position=UDim2.new(0.5,-14,0.5,-14)icon.BackgroundTransparency=1
+sidebarBtnObjs[idx]=sBtn
+end
+
+local HubFrame=Instance.new("Frame",gui)
+HubFrame.Size=UDim2.fromOffset(420,370)
+HubFrame.Position=UDim2.fromScale(0.5,0.56)
+HubFrame.AnchorPoint=Vector2.new(0.5,0.5)
+HubFrame.BackgroundColor3=Color3.fromRGB(unpack(settings.theme.Panel))
+HubFrame.Visible=false
+Instance.new("UICorner",HubFrame).CornerRadius=UDim.new(0,18)
+local hs=Instance.new("UIStroke",HubFrame)hs.Color=Color3.fromRGB(unpack(settings.theme.Accent))hs.Thickness=2 hs.Transparency=0.38
+
+local HubTitle=Instance.new("TextLabel",HubFrame)
+HubTitle.Text="Nulux Hub"
+HubTitle.Size=UDim2.new(1,-48,0,52)
+HubTitle.Position=UDim2.new(0,20,0,12)
+HubTitle.TextColor3=Color3.fromRGB(unpack(settings.theme.Text))
+HubTitle.Font=Enum.Font.GothamBold
+HubTitle.TextSize=29
+HubTitle.BackgroundTransparency=1
+
+local CloseBtn=Instance.new("ImageButton",HubFrame)
+CloseBtn.Image=assets.close
+CloseBtn.Size=UDim2.fromOffset(34,34)
+CloseBtn.Position=UDim2.new(1,-42,0,18)
+CloseBtn.BackgroundTransparency=1
+CloseBtn.MouseButton1Click:Connect(function()HubFrame.Visible=false Sidebar.Visible=false end)
+
+local menuTabs={Reach={{icon=assets.reach,label="Standard Reach",key="reachOn",type="toggle"},{icon=assets.reach,label="Reach X",key="reachX",min=1,max=150,type="slider"},{icon=assets.reach,label="Reach Y",key="reachY",min=1,max=150,type="slider"},{icon=assets.reach,label="Reach Z",key="reachZ",min=1,max=150,type="slider"},{icon=assets.reach,label="Offset X",key="offsetX",min=-50,max=50,type="slider"},{icon=assets.reach,label="Offset Y",key="offsetY",min=-50,max=50,type="slider"},{icon=assets.reach,label="Offset Z",key="offsetZ",min=-50,max=50,type="slider"}},GK={{icon=assets.gk,label="Auto Catch V2",key="autoCatchOn",type="toggle"},{icon=assets.gk,label="Auto React",key="autoGKReactOn",type="toggle"},{icon=assets.gk,label="No Cooldown",key="noGKCooldownOn",type="toggle"},{icon=assets.gk,label="Dive Distance",key="diveDist",min=60,max=250,type="slider"}},Predictor={{icon=assets.pred,label="Predictor",key="predOn",type="toggle"},{icon=assets.pred,label="Line Thickness",key="lineThick",min=0.2,max=10,type="slider"},{icon=assets.pred,label="Advanced Predictor",key="advPred",type="toggle"}},Ball={{icon=assets.ball,label="Powershot",key="powershotOn",type="toggle"},{icon=assets.ball,label="Inf Charge",key="infShotChargeOn",type="toggle"},{icon=assets.ball,label="Auto Top Bins",key="autoTopBinsOn",type="toggle"},{icon=assets.ball,label="Ball Magnet",key="bringBallOn",type="toggle"},{icon=assets.ball,label="Auto Goal",key="autoGoalFixed",type="toggle"}},Local={{icon=assets.player,label="Infinite Stamina",key="infStamOn",type="toggle"},{icon=assets.player,label="Always Sprint",key="alwaysSprintOn",type="toggle"},{icon=assets.player,label="Anti Ragdoll",key="antiRagdollOn",type="toggle"}}}
+
+local Panels={}
+for tabName,controls in pairs(menuTabs)do
+local tabPanel=Instance.new("Frame",HubFrame)
+tabPanel.BackgroundTransparency=1
+tabPanel.Size=UDim2.new(1,-38,1,-70)
+tabPanel.Position=UDim2.new(0,29,0,58)
+tabPanel.Visible=tabName=="Reach"
+Panels[tabName]=tabPanel
+local layout=Instance.new("UIListLayout",tabPanel)layout.Padding=UDim.new(0,12)
+for _,ctrl in ipairs(controls)do
+local row=Instance.new("Frame",tabPanel)
+row.Size=UDim2.new(1,0,0,52)row.BackgroundColor3=Color3.fromRGB(unpack(settings.theme.PanelActive))row.BackgroundTransparency=0.20
+Instance.new("UICorner",row)
+local icon=Instance.new("ImageLabel",row)icon.Image=ctrl.icon icon.BackgroundTransparency=1 icon.Size=UDim2.fromOffset(24,24)icon.Position=UDim2.new(0,12,0.5,-12)
+local label=Instance.new("TextLabel",row)label.Text=ctrl.label label.BackgroundTransparency=1 label.TextColor3=Color3.fromRGB(unpack(settings.theme.Text))label.Font=Enum.Font.Gotham label.TextSize=20 label.Size=UDim2.new(0.5,0,1,0)label.Position=UDim2.new(0,48,0,0)label.TextXAlignment=Enum.TextXAlignment.Left
+if ctrl.type=="toggle"then
+local tBtn=Instance.new("TextButton",row)
+tBtn.Size=UDim2.fromOffset(44,32)
+tBtn.Position=UDim2.new(1,-52,0.5,-16)
+tBtn.AnchorPoint=Vector2.new(1,0.5)
+tBtn.BackgroundColor3=settings[ctrl.key]and Color3.fromRGB(unpack(settings.theme.Accent))or Color3.fromRGB(84,12,104)
+tBtn.Text=settings[ctrl.key]and"ON"or"OFF"
+tBtn.TextColor3=Color3.new(1,1,1)
+tBtn.Font=Enum.Font.GothamBold tBtn.TextSize=18 Instance.new("UICorner",tBtn).CornerRadius=UDim.new(0,9)
+tBtn.MouseButton1Click:Connect(function()settings[ctrl.key]=not settings[ctrl.key]tBtn.Text=settings[ctrl.key]and"ON"or"OFF"tBtn.BackgroundColor3=settings[ctrl.key]and Color3.fromRGB(unpack(settings.theme.Accent))or Color3.fromRGB(84,12,104)saveSettings()end)
+elseif ctrl.type=="slider"then
+local slider=Instance.new("Frame",row)slider.Size=UDim2.new(0.43,0,0,12)slider.Position=UDim2.new(1,-138,0.5,-6)slider.BackgroundColor3=Color3.fromRGB(44,77,220)Instance.new("UICorner",slider).CornerRadius=UDim.new(0,6)
+local fill=Instance.new("Frame",slider)fill.Size=UDim2.new((settings[ctrl.key]-ctrl.min)/(ctrl.max-ctrl.min),0,1,0)fill.BackgroundColor3=Color3.fromRGB(unpack(settings.theme.Accent))Instance.new("UICorner",fill).CornerRadius=UDim.new(0,8)
+local knob=Instance.new("ImageButton",slider)knob.Size=UDim2.fromOffset(18,18)knob.Position=UDim2.new((settings[ctrl.key]-ctrl.min)/(ctrl.max-ctrl.min),-9,0,-3)knob.AnchorPoint=Vector2.new(0,0.5)knob.Image=assets.triangle knob.BackgroundTransparency=1
+knob.MouseButton1Down:Connect(function()
+local moveConn moveConn=UserInputService.InputChanged:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseMovement then local rel=math.clamp((input.Position.X-slider.AbsolutePosition.X)/slider.AbsoluteSize.X,0,1)local val=ctrl.min+(ctrl.max-ctrl.min)*rel settings[ctrl.key]=math.round(val)fill.Size=UDim2.new(rel,0,1,0)knob.Position=UDim2.new(rel,-9,0,-3)saveSettings()end end)
+UserInputService.InputEnded:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 then moveConn:Disconnect()end end)
+end)
+end
+end
+end
+
+for idx,sBtn in pairs(sidebarBtnObjs)do
+sBtn.MouseButton1Click:Connect(function()
+for tab,pan in pairs(Panels)do pan.Visible=false end
+Panels[sidebarBtns[idx][2]].Visible=true
+for i,btn in pairs(sidebarBtnObjs)do btn.BackgroundColor3=i==idx and Color3.fromRGB(unpack(settings.theme.PanelActive))or Color3.fromRGB(unpack(settings.theme.Panel))end
+end)
+end
+
+LoginBtn.MouseButton1Click:Connect(function()
+clickSound:Play()
+local user=UsernameBox.Text
+local key=KeyBox.Text
+if key=="free2025"and user==player.Name then
+saveUser(user)
+TweenService:Create(LoginFrame,TweenInfo.new(0.8,Enum.EasingStyle.Quint),{Size=UDim2.fromOffset(480,400),BackgroundTransparency=1}):Play()
+TweenService:Create(Background,TweenInfo.new(1),{ImageTransparency=1}):Play()
+task.wait(0.7)
+LoginFrame.Visible=false
+Background.Visible=false
+HubFrame.Visible=true
+Sidebar.Visible=true
+else
+KeyBox.Text=""
+KeyBox.PlaceholderText="Invalid Key"
+TweenService:Create(KeyBox,TweenInfo.new(0.3),{TextColor3=Color3.fromRGB(255,100,100)}):Play()
+task.wait(0.4)
+TweenService:Create(KeyBox,TweenInfo.new(0.3),{TextColor3=Color3.fromRGB(230,240,255)}):Play()
+KeyBox.PlaceholderText="Key"
+end
+end)
+
+local Camera=Workspace.CurrentCamera
+local char=player.Character or player.CharacterAdded:Wait()
+local hum=char:WaitForChild("Humanoid")
+local hrp=char:WaitForChild("HumanoidRootPart")
+player.CharacterAdded:Connect(function(c)char=c hum=c:WaitForChild("Humanoid")hrp=c:WaitForChild("HumanoidRootPart")end)
+
+local function getBalls()local balls={}pcall(function()for _,b in CollectionService:GetTagged("Ball")do if b:IsA("BasePart")then table.insert(balls,b)end end end)return balls end
+
+local hitbox=Instance.new("Part")
+hitbox.Name="NuluxReachBox"
+hitbox.Anchored=true
+hitbox.CanCollide=false
+hitbox.Transparency=1
+hitbox.Material=Enum.Material.ForceField
+hitbox.Parent=Workspace
+
+local box=Instance.new("SelectionBox")box.Adornee=hitbox box.LineThickness=0.05 box.Color3=Color3.fromRGB(0,255,255)box.Transparency=0.5 box.Parent=hitbox
+
+local params=OverlapParams.new()params.FilterType=Enum.RaycastFilterType.Blacklist params.FilterDescendantsInstances={hitbox}
+
+local lastKick,kickPlaying=0,false
+hum.AnimationPlayed:Connect(function(anim)if anim.Animation.AnimationId:find("kick")or anim.Animation.AnimationId:find("shot")then kickPlaying=true anim.Stopped:Connect(function()kickPlaying=false end)end end)
+
+RunService.Heartbeat:Connect(function()
+local balls=getBalls()
+if #balls==0 or not hrp then return end
+local showVis=settings.visOn or settings.reachOn
+if showVis then
+hitbox.CFrame=hrp.CFrame*CFrame.new(settings.offsetX,settings.offsetY,settings.offsetZ)
+hitbox.Size=Vector3.new(settings.reachX,settings.reachY,settings.reachZ)
+box.Transparency=math.sin(tick()*4)*0.3+0.4
+else
+box.Transparency=1
+end
+if settings.reachOn then
+local parts=Workspace:GetPartBoundsInBox(hitbox.CFrame,hitbox.Size,params)
+for _,part in parts do
+for _,ball in balls do
+if part==ball then
+local limbs={"LeftFoot","RightFoot","Left Leg","Right Leg","LeftHand","RightHand"}
+for _,limbName in limbs do
+local limb=char:FindFirstChild(limbName)
+if limb then for i=1,8 do firetouchinterest(limb,ball,0)firetouchinterest(limb,ball,1)end end
+end
+end
+end
+end
+end
+if settings.infStamOn then
+spawn(function()
+while settings.infStamOn do
+pcall(function()
+local ps=player:FindFirstChild("PlayerScripts")
+if ps then
+local c=ps:FindFirstChild("controllers")
+if c then
+local m=c:FindFirstChild("movementController")
+if m then
+local s=m:FindFirstChild("stamina")
+if s then s.Value=100 end
+end
+end
+end
+end)
+task.wait(0.2)
+end
+end)
+end
+if settings.alwaysSprintOn then hum.WalkSpeed=30 end
+if settings.powershotOn and kickPlaying then local ball=balls[1]if ball then ball.AssemblyLinearVelocity=ball.AssemblyLinearVelocity*1.8 end end
+if settings.autoTopBinsOn and kickPlaying and tick()-lastKick>1 then
+lastKick=tick()
+local oppositeZ=hrp.Position.Z>0 and -53 or 53
+local ball=balls[1]
+if ball then
+ball.AssemblyLinearVelocity=(Vector3.new(math.random(-3,3),math.random(4,5.5),oppositeZ)-ball.Position).Unit*170+Vector3.new(0,25,0)
+end
+end
+if settings.bringBallOn then local ball=balls[1]if ball then ball.AssemblyLinearVelocity=ball.AssemblyLinearVelocity+(hrp.Position-ball.Position).Unit*80 end end
+if settings.autoGKReactOn then hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity+hrp.CFrame.LookVector*settings.diveDist end
+if settings.antiRagdollOn then hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,false) end
+if settings.autoCatchOn then local ball=balls[1]if ball and (ball.Position-hrp.Position).Magnitude<12 then ball.AssemblyLinearVelocity=(hrp.Position-ball.Position).Unit*120 end end
+end)
