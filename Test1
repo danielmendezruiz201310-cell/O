@@ -1,0 +1,438 @@
+local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+
+local saveFile = "NuluxSettings.json"
+local defaultSettings = {
+    reachOn=false, visOn=false,
+    reachX=30, reachY=30, reachZ=30,
+    offsetX=0, offsetY=0, offsetZ=0,
+    gkReachOn=false, gkVisOn=false,
+    gkReachX=30, gkReachY=30, gkReachZ=30,
+    gkOffsetX=0, gkOffsetY=0, gkOffsetZ=0,
+    infStamOn=false, alwaysSprintOn=false, antiRagdollOn=false,
+    autoCatchOn=false, autoGKReactOn=false, noGKCooldownOn=false,
+    diveDist=120,
+    powershotOn=false, infShotChargeOn=false,
+    autoTopBinsOn=false, bringBallOn=false, autoGoalFixed=false,
+    predOn=false,
+    predLineThick=1.5,
+    predColor={0,255,255},
+    advPred=false,
+    predTimeOffset=0.4,
+    showImpactDot=true,
+    showTimeToReach=true,
+    ballVelMult=1,
+    showPredTrail=false,
+    trailLength=8,
+    showBounce=false,
+    theme={Accent={170,0,255},Background={15,0,35},Text={240,240,255}},
+}
+local settings = defaultSettings
+pcall(function()
+    if isfile and isfile(saveFile) then
+        settings = HttpService:JSONDecode(readfile(saveFile))
+    end
+end)
+local sliderDefaults = {
+    reachX=30, reachY=30, reachZ=30,
+    offsetX=0, offsetY=0, offsetZ=0,
+    gkReachX=30, gkReachY=30, gkReachZ=30,
+    gkOffsetX=0, gkOffsetY=0, gkOffsetZ=0,
+    predLineThick=1.5,
+    predTimeOffset=0.4,
+    ballVelMult=1,
+    trailLength=8,
+    diveDist=120,
+}
+for k,v in pairs(sliderDefaults) do
+    if type(settings[k]) ~= "number" then
+        settings[k] = v
+    end
+end
+local function saveSettings()
+    pcall(function()
+        if writefile then writefile(saveFile, HttpService:JSONEncode(settings)) end
+    end)
+end
+local player = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local Window = MacLib:Window({
+    Title = "Nulux Hub 🎄",
+    Subtitle = "Paid Version",
+    Size = UDim2.fromOffset(650, 420),
+    ShowUserInfo = false,
+    AcrylicBlur = true,
+})
+local Tabs = Window:TabGroup()
+local ReachTab     = Tabs:Tab({ Name = "Reach" })
+local GKReachTab   = Tabs:Tab({ Name = "GK Reach" })
+local VisualTab    = Tabs:Tab({ Name = "Ball Predictor" })
+local LocalTab     = Tabs:Tab({ Name = "Local Player" })
+local BallTab      = Tabs:Tab({ Name = "Ball Mods" })
+
+local function MakeToggle(section, name, key)
+    return section:Toggle({Name=name, Default=settings[key], Callback=function(state) settings[key]=state saveSettings() end})
+end
+local function MakeSlider(section, name, key, min, max, decimal)
+    return section:Slider({
+        Name=name, Default=settings[key], Minimum=min, Maximum=max,
+        Precision=decimal and 1 or 0, DisplayMethod="Value",
+        Callback=function(val) settings[key]=val saveSettings() end
+    })
+end
+
+local ReachSection = ReachTab:Section({ Side = "Left" })
+ReachSection:Header({Text="Reach"})
+MakeToggle(ReachSection, "Enable Reach", "reachOn")
+ReachSection:Divider()
+MakeToggle(ReachSection, "Visualizer", "visOn")
+ReachSection:Divider()
+ReachSection:Label({Text="Reach Dimensions"})
+MakeSlider(ReachSection, "Reach X", "reachX", 1, 120)
+MakeSlider(ReachSection, "Reach Y", "reachY", 1, 80)
+MakeSlider(ReachSection, "Reach Z", "reachZ", 1, 120)
+ReachSection:Spacer()
+ReachSection:Label({Text="Reach Offset"})
+MakeSlider(ReachSection, "Offset X", "offsetX", -50, 50)
+MakeSlider(ReachSection, "Offset Y", "offsetY", -50, 50)
+MakeSlider(ReachSection, "Offset Z", "offsetZ", -50, 50)
+
+local GKSection = GKReachTab:Section({ Side = "Left" })
+GKSection:Header({Text="GK Reach"})
+MakeToggle(GKSection, "GK Reach", "gkReachOn")
+GKSection:Divider()
+MakeToggle(GKSection, "GK Visualizer", "gkVisOn")
+GKSection:Divider()
+GKSection:Label({Text="GK Reach Dimensions"})
+MakeSlider(GKSection, "GK Reach X", "gkReachX", 1, 120)
+MakeSlider(GKSection, "GK Reach Y", "gkReachY", 1, 120)
+MakeSlider(GKSection, "GK Reach Z", "gkReachZ", 1, 120)
+GKSection:Spacer()
+GKSection:Label({Text="GK Offset"})
+MakeSlider(GKSection, "GK Offset X", "gkOffsetX", -50, 50)
+MakeSlider(GKSection, "GK Offset Y", "gkOffsetY", -50, 50)
+MakeSlider(GKSection, "GK Offset Z", "gkOffsetZ", -50, 50)
+
+local VisSection = VisualTab:Section({ Side = "Left" })
+VisSection:Header({Text="Ball Predictor"})
+MakeToggle(VisSection, "Enable Predictor", "predOn")
+MakeSlider(VisSection, "Line Thickness", "predLineThick", 0.2, 10, true)
+VisSection:Colorpicker({
+    Name="Line Color",
+    Default=Color3.fromRGB(unpack(settings.predColor or {0,255,255})),
+    Callback=function(c)
+        settings.predColor = {math.round(c.R*255), math.round(c.G*255), math.round(c.B*255)}
+        saveSettings()
+    end
+}, "PredColor")
+MakeToggle(VisSection, "Advanced Prediction", "advPred")
+MakeSlider(VisSection, "Prediction Time Offset", "predTimeOffset", 0.05, 2, true)
+MakeToggle(VisSection, "Show Impact Dot", "showImpactDot")
+MakeToggle(VisSection, "Show Time to Reach", "showTimeToReach")
+MakeSlider(VisSection, "Ball Velocity Multiplier", "ballVelMult", 0.2, 2, true)
+MakeToggle(VisSection, "Enable Prediction Trail", "showPredTrail")
+MakeSlider(VisSection, "Trail Length", "trailLength", 3, 30)
+MakeToggle(VisSection, "Show Predicted Bounce", "showBounce")
+VisSection:Divider()
+VisSection:Label({Text="All predictor features apply in real-time!"})
+
+local LocalSection = LocalTab:Section({ Side = "Left" })
+LocalSection:Header({Text="Local Player"})
+MakeToggle(LocalSection, "Infinite Stamina", "infStamOn")
+MakeToggle(LocalSection, "Always Sprint", "alwaysSprintOn")
+MakeToggle(LocalSection, "Anti Ragdoll", "antiRagdollOn")
+
+local BallSection = BallTab:Section({ Side = "Left" })
+BallSection:Header({Text="Ball Mods"})
+MakeToggle(BallSection, "Powershot", "powershotOn")
+MakeToggle(BallSection, "Inf Charge", "infShotChargeOn")
+MakeToggle(BallSection, "Auto Top Bins", "autoTopBinsOn")
+MakeToggle(BallSection, "Ball Magnet", "bringBallOn")
+MakeToggle(BallSection, "Auto Goal", "autoGoalFixed")
+BallSection:Spacer()
+BallSection:Button({
+    Name="Print Settings",
+    Callback=function()
+        Window:Notify({Title="Nulux Hub", Description="Settings output to console.", Lifetime=3})
+        print(HttpService:JSONEncode(settings))
+    end,
+})
+
+Window:Notify({
+    Title = "Nulux Hub 🎄",
+    Description = "Paid version loaded! Settings auto-save.",
+    Lifetime = 4
+})
+
+local function getBalls()
+    local balls = {}
+    pcall(function()
+        for _, b in CollectionService:GetTagged("Ball") do
+            if b:IsA("BasePart") then table.insert(balls, b) end
+        end
+    end)
+    return balls
+end
+local player = Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+player.CharacterAdded:Connect(function(c)
+    char = c
+    hum = c:WaitForChild("Humanoid")
+    hrp = c:WaitForChild("HumanoidRootPart")
+end)
+local lastKick, kickPlaying = 0, false
+hum.AnimationPlayed:Connect(function(anim)
+    if anim.Animation.AnimationId:find("kick") or anim.Animation.AnimationId:find("shot") then
+        kickPlaying = true
+        anim.Stopped:Connect(function()kickPlaying=false end)
+    end
+end)
+
+local feetHitbox=Instance.new("Part")
+feetHitbox.Name="NuluxFeetReachBox"
+feetHitbox.Anchored=true
+feetHitbox.CanCollide=false
+feetHitbox.Transparency=1
+feetHitbox.Material=Enum.Material.ForceField
+feetHitbox.Parent=Workspace
+local feetBox=Instance.new("SelectionBox")
+feetBox.Adornee=feetHitbox feetBox.LineThickness=0.08
+feetBox.Color3=Color3.fromRGB(0,255,255)
+feetBox.Transparency=0.5
+feetBox.Parent=feetHitbox
+local feetGrad=Instance.new("UIGradient")
+feetGrad.Color=ColorSequence.new{
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(0,255,255)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(100,255,255))
+}
+feetGrad.Rotation=45 feetGrad.Parent=feetBox
+local feetStroke=Instance.new("UIStroke")
+feetStroke.Color=Color3.fromRGB(0,255,255)
+feetStroke.Thickness=2
+feetStroke.Transparency=0.15
+feetStroke.Parent=feetBox
+
+local gkHitbox=Instance.new("Part")
+gkHitbox.Name="NuluxGKReachBox"
+gkHitbox.Anchored=true
+gkHitbox.CanCollide=false
+gkHitbox.Transparency=1
+gkHitbox.Material=Enum.Material.ForceField
+gkHitbox.Parent=Workspace
+local gkBox=Instance.new("SelectionBox")
+gkBox.Adornee=gkHitbox gkBox.LineThickness=0.08
+gkBox.Color3=Color3.fromRGB(255,255,0)
+gkBox.Transparency=0.5
+gkBox.Parent=gkHitbox
+local gkGrad=Instance.new("UIGradient")
+gkGrad.Color=ColorSequence.new{
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,0)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(200,200,35))
+}
+gkGrad.Rotation=45 gkGrad.Parent=gkBox
+local gkStroke=Instance.new("UIStroke")
+gkStroke.Color=Color3.fromRGB(255,255,0)
+gkStroke.Thickness=2
+gkStroke.Transparency=0.15
+gkStroke.Parent=gkBox
+
+local paramsFeet=OverlapParams.new()
+paramsFeet.FilterType=Enum.RaycastFilterType.Blacklist
+paramsFeet.FilterDescendantsInstances={feetHitbox}
+local paramsGK=OverlapParams.new()
+paramsGK.FilterType=Enum.RaycastFilterType.Blacklist
+paramsGK.FilterDescendantsInstances={gkHitbox}
+
+local predLine, bounceLine
+local dot=Drawing.new("Circle")
+dot.Visible=false dot.Thickness=4
+dot.Color=Color3.fromRGB(unpack(settings.predColor or {0,255,255}))
+dot.Filled=true dot.Radius=12
+local timeLabel=Drawing.new("Text")
+timeLabel.Visible=false
+timeLabel.Size=24
+timeLabel.Color=Color3.fromRGB(255,50,50)
+timeLabel.Center=true timeLabel.Outline=true
+
+local trail = {}
+local function renderTrail(points, color, thick)
+    for _, l in ipairs(trail) do l:Remove() end
+    trail = {}
+    for i=2, #points do
+        local line=Drawing.new("Line")
+        line.From = points[i-1]
+        line.To = points[i]
+        line.Color = color
+        line.Thickness = thick
+        line.Visible = true
+        table.insert(trail, line)
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    if settings.visOn or settings.reachOn then
+        feetHitbox.CFrame = hrp.CFrame * CFrame.new(settings.offsetX,settings.offsetY,settings.offsetZ)
+        feetHitbox.Size = Vector3.new(settings.reachX,settings.reachY,settings.reachZ)
+        feetBox.Transparency=math.sin(tick()*4)*0.3+0.4
+        feetStroke.Transparency=0.15
+        feetHitbox.Transparency=1
+    else
+        feetBox.Transparency=1 feetStroke.Transparency=1
+    end
+    if settings.gkVisOn or settings.gkReachOn then
+        gkHitbox.CFrame = hrp.CFrame * CFrame.new(settings.gkOffsetX,settings.gkOffsetY,settings.gkOffsetZ)
+        gkHitbox.Size = Vector3.new(settings.gkReachX,settings.gkReachY,settings.gkReachZ)
+        gkBox.Transparency=math.sin(tick()*3.2)*0.3+0.4
+        gkStroke.Transparency=0.15
+        gkHitbox.Transparency=1
+    else
+        gkBox.Transparency=1 gkStroke.Transparency=1
+    end
+    if settings.reachOn then
+        local parts=Workspace:GetPartBoundsInBox(feetHitbox.CFrame,feetHitbox.Size,paramsFeet)
+        for _,part in pairs(parts) do
+            for _,ball in pairs(getBalls()) do
+                if part == ball then
+                    for _,limbName in pairs({"LeftFoot","RightFoot","Left Leg","Right Leg","LeftHand","RightHand"}) do
+                        local limb=char:FindFirstChild(limbName)
+                        if limb then
+                            for i=1,8 do
+                                firetouchinterest(limb,ball,0)
+                                firetouchinterest(limb,ball,1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if settings.gkReachOn then
+        local parts=Workspace:GetPartBoundsInBox(gkHitbox.CFrame,gkHitbox.Size,paramsGK)
+        for _,part in pairs(parts) do
+            for _,ball in pairs(getBalls()) do
+                if part == ball then
+                    for _,limbName in pairs({"LeftHand","RightHand"}) do
+                        local limb=char:FindFirstChild(limbName)
+                        if limb then
+                            for i=1,8 do
+                                firetouchinterest(limb,ball,0)
+                                firetouchinterest(limb,ball,1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if settings.predOn then
+        local ball = getBalls()[1]
+        local color = Color3.fromRGB(unpack(settings.predColor or {0,255,255}))
+        if ball and ball.AssemblyLinearVelocity.Magnitude>2 then
+            local predVel = ball.AssemblyLinearVelocity * settings.ballVelMult
+            local fut = ball.Position + predVel * settings.predTimeOffset
+            predLine = Workspace:FindFirstChild("PredLine") or Instance.new("Part")
+            predLine.Name="PredLine"
+            predLine.Anchored=true
+            predLine.CanCollide=false
+            predLine.Material=Enum.Material.Neon
+            predLine.Color=color
+            predLine.Size=Vector3.new(settings.predLineThick,settings.predLineThick,(fut-ball.Position).Magnitude)
+            predLine.CFrame = CFrame.new(ball.Position, fut) * CFrame.new(0, 0, -(fut-ball.Position).Magnitude/2)
+            predLine.Parent = Workspace
+            if settings.advPred then
+                if settings.showImpactDot then
+                    local screenPos,on = Camera:WorldToViewportPoint(fut)
+                    if on then
+                        dot.Position = Vector2.new(screenPos.X,screenPos.Y)
+                        dot.Color = color
+                        dot.Visible = true
+                    else
+                        dot.Visible = false
+                    end
+                end
+                if settings.showTimeToReach then
+                    local screenPos,_ = Camera:WorldToViewportPoint(fut)
+                    timeLabel.Position=Vector2.new(screenPos.X,screenPos.Y+25)
+                    timeLabel.Text=string.format("%.2fs", (hrp.Position-fut).Magnitude/predVel.Magnitude)
+                    timeLabel.Visible=true
+                else
+                    timeLabel.Visible=false
+                end
+                if settings.showPredTrail then
+                    local points = {}
+                    for i = 1, settings.trailLength do
+                        local step = ball.Position + predVel * (settings.predTimeOffset*i/settings.trailLength)
+                        local screen,on = Camera:WorldToViewportPoint(step)
+                        table.insert(points, Vector2.new(screen.X, screen.Y))
+                    end
+                    renderTrail(points, color, settings.predLineThick)
+                else
+                    renderTrail({}, color, settings.predLineThick)
+                end
+                if settings.showBounce then
+                    local bounceVel = Vector3.new(predVel.X, -0.6*math.abs(predVel.Y), predVel.Z)
+                    local bouncePos = fut + bounceVel * 0.35
+                    bounceLine = bounceLine or Instance.new("Part")
+                    bounceLine.Name="BounceLine"
+                    bounceLine.Anchored=true bounceLine.CanCollide=false
+                    bounceLine.Material=Enum.Material.Neon
+                    bounceLine.Color=Color3.fromRGB(60,180,80)
+                    bounceLine.Size=Vector3.new(0.6,0.6,(bouncePos-fut).Magnitude)
+                    bounceLine.CFrame = CFrame.new(fut, bouncePos) * CFrame.new(0, 0, -(bouncePos-fut).Magnitude/2)
+                    bounceLine.Parent = Workspace
+                elseif bounceLine then bounceLine:Destroy() bounceLine=nil end
+            else
+                dot.Visible = false timeLabel.Visible = false renderTrail({}, color, settings.predLineThick)
+                if bounceLine then bounceLine:Destroy() bounceLine=nil end
+            end
+        elseif predLine then predLine:Destroy() dot.Visible=false timeLabel.Visible=false renderTrail({}, color, settings.predLineThick) if bounceLine then bounceLine:Destroy() bounceLine=nil end end
+    elseif predLine then predLine:Destroy() dot.Visible=false timeLabel.Visible=false renderTrail({}, Color3.new(0,0,0), 1) if bounceLine then bounceLine:Destroy() bounceLine=nil end end
+    if settings.infStamOn then
+        spawn(function()
+            while settings.infStamOn do
+                pcall(function()
+                    local ps=player:FindFirstChild("PlayerScripts")
+                    if ps then
+                        local c=ps:FindFirstChild("controllers")
+                        if c then
+                            local m=c:FindFirstChild("movementController")
+                            if m then
+                                local s=m:FindFirstChild("stamina")
+                                if s then s.Value=100 end
+                            end
+                        end
+                    end
+                end)
+                task.wait(0.2)
+            end
+        end)
+    end
+    if settings.alwaysSprintOn then hum.WalkSpeed=30 end
+    if settings.powershotOn and kickPlaying then local ball=getBalls()[1]if ball then ball.AssemblyLinearVelocity=ball.AssemblyLinearVelocity*1.8 end end
+    if settings.autoTopBinsOn and kickPlaying and tick()-lastKick>1 then
+        lastKick = tick()
+        local oppositeZ = hrp.Position.Z>0 and -53 or 53
+        local ball=getBalls()[1]
+        if ball then
+            ball.AssemblyLinearVelocity = (Vector3.new(math.random(-3,3),math.random(4,5.5),oppositeZ)-ball.Position).Unit*170+Vector3.new(0,25,0)
+        end
+    end
+    if settings.bringBallOn then local ball=getBalls()[1]if ball then ball.AssemblyLinearVelocity=ball.AssemblyLinearVelocity+(hrp.Position-ball.Position).Unit*80 end end
+    if settings.autoGKReactOn then hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity+hrp.CFrame.LookVector*settings.diveDist end
+    if settings.antiRagdollOn then hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,false) end
+    if settings.autoCatchOn then
+        local ball=getBalls()[1]
+        if ball and (ball.Position-hrp.Position).Magnitude<12 then
+            ball.AssemblyLinearVelocity = (hrp.Position-ball.Position).Unit*120
+        end
+    end
+end)
