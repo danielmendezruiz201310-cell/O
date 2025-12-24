@@ -1,0 +1,177 @@
+local Fluent=loadstring(game:HttpGet("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
+local Window=Fluent:CreateWindow{Title="a1q Hub 2025",TabWidth=160,Size=UDim2.fromOffset(620,440),Acrylic=true,Theme="Vynixu",MinimizeKey=Enum.KeyCode.RightControl}
+local CombatTab=Window:AddTab{Title="Combat",Icon="sword"}
+local VisualTab=Window:AddTab{Title="Visuals",Icon="eye"}
+local MiscTab=Window:AddTab{Title="Misc",Icon="settings"}
+
+for _,v in pairs(getgc(true))do if type(v)=="table"and rawget(v,"gkCheck")then local c=debug.getconstants(v.react)for i,val in pairs(c)do if val=="ignoreReactDecline"or val=="specialTool"then debug.setconstant(v.react,i,"ball")elseif val=="overlapCheck"then rawset(v,"check",function()return true end)debug.setconstant(v.react,i,"check")end end end end
+for _,v in pairs(getgc(true))do if type(v)=="function"and getfenv(v).script and getfenv(v).script.Name:find("Root")then local c=debug.getconstants(v)for i,val in pairs(c)do if val=="NetworkOwner"or val=="getNetworkOwner"then debug.setconstant(v,i,function()return game.Players.LocalPlayer end)end end end end
+
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local CollectionService=game:GetService("CollectionService")
+local ReplicatedStorage=game:GetService("ReplicatedStorage")
+local Camera=workspace.CurrentCamera
+local player=Players.LocalPlayer
+
+local reachOn=false
+local reachDist=6
+local visOn=false
+local stamOn=false
+local predOn=false
+local thick=1.2
+local advPred=false
+local gkReachOn=false
+local gkReachDist=25
+local gkVisOn=false
+local staminaConnection
+
+local hitbox=Instance.new("Part")
+hitbox.Name="a1qReach"
+hitbox.Anchored=true
+hitbox.CanCollide=false
+hitbox.Transparency=1
+hitbox.Size=Vector3.new(reachDist,reachDist,reachDist)
+hitbox.Parent=workspace
+
+local box=Instance.new("SelectionBox",hitbox)
+box.Adornee=hitbox
+box.LineThickness=0.02
+box.Color3=Color3.fromRGB(100,200,255)
+box.Transparency=1
+
+local gkHitbox=Instance.new("Part")
+gkHitbox.Name="a1qGKReach"
+gkHitbox.Anchored=true
+gkHitbox.CanCollide=false
+gkHitbox.Transparency=1
+gkHitbox.Size=Vector3.new(gkReachDist,gkReachDist,gkReachDist)
+gkHitbox.Parent=workspace
+
+local gkBox=Instance.new("SelectionBox",gkHitbox)
+gkBox.Adornee=gkHitbox
+gkBox.LineThickness=0.04
+gkBox.Color3=Color3.fromRGB(255,100,100)
+gkBox.Transparency=1
+
+local predLine
+local dot=Drawing.new("Circle")
+dot.Visible=false
+dot.Thickness=3
+dot.Color=Color3.fromRGB(255,0,0)
+dot.Filled=true
+dot.Radius=10
+
+local timeLabel=Drawing.new("Text")
+timeLabel.Visible=false
+timeLabel.Size=22
+timeLabel.Color=Color3.fromRGB(255,50,50)
+timeLabel.Center=true
+timeLabel.Outline=true
+
+local function getBall()
+for _,b in CollectionService:GetTagged("Ball")do if b:IsA("BasePart")then return b end end
+for _,b in workspace:GetDescendants()do if b:IsA("BasePart")and(b.Name:lower():find("ball")or b.Name:lower():find("football"))then return b end end
+end
+
+local params=OverlapParams.new()
+params.FilterType=Enum.RaycastFilterType.Blacklist
+params.FilterDescendantsInstances={hitbox,gkHitbox}
+
+CombatTab:AddToggle("LegReach",{Title="Leg Reach",Default=false,Callback=function(v)reachOn=v end})
+CombatTab:AddSlider("ReachDist",{Title="Leg Reach Distance",Min=3,Max=50,Default=6,Rounding=0,Callback=function(v)reachDist=v end})
+CombatTab:AddToggle("ShowVis",{Title="Leg Reach Visualizer",Default=false,Callback=function(v)visOn=v end})
+
+CombatTab:AddToggle("GKReach",{Title="GK Reach (Advanced)",Default=false,Callback=function(v)gkReachOn=v end})
+CombatTab:AddSlider("GKReachDist",{Title="GK Reach Distance",Min=15,Max=60,Default=25,Rounding=0,Callback=function(v)gkReachDist=v end})
+CombatTab:AddToggle("GKVis",{Title="GK Reach Visualizer",Default=false,Callback=function(v)gkVisOn=v end})
+
+local stamWarningShown=false
+local function createStaminaWarning()if stamWarningShown then return end stamWarningShown=true Fluent:Notify({Title="CAUTION",Content="Infinite Stamina is DETECTED\nUse at your own cost",Duration=10})end
+CombatTab:AddToggle("InfStamina",{Title="Infinite Stamina",Default=false,Callback=function(v)createStaminaWarning()stamOn=v end})
+
+VisualTab:AddToggle("BallPred",{Title="Ball Predictor",Default=false,Callback=function(v)predOn=v end})
+VisualTab:AddSlider("LineThick",{Title="Line Thickness",Min=0.2,Max=10,Default=1.2,Rounding=1,Callback=function(v)thick=v end})
+VisualTab:AddToggle("AdvPred",{Title="Advanced Predictor (Dot + Timer)",Default=false,Callback=function(v)advPred=v end})
+
+MiscTab:AddButton({Title="TP to Ball",Callback=function()local b=getBall()if b and player.Character and player.Character:FindFirstChild("HumanoidRootPart")then player.Character.HumanoidRootPart.CFrame=b.CFrame*CFrame.new(0,4,0)end end})
+MiscTab:AddButton({Title="Bring Ball",Callback=function()local b=getBall()if b and player.Character and player.Character:FindFirstChild("HumanoidRootPart")then b.CFrame=player.Character.HumanoidRootPart.CFrame*CFrame.new(0,0,-3)b.Velocity=Vector3.zero b.RotVelocity=Vector3.zero b.AssemblyLinearVelocity=Vector3.zero end end})
+MiscTab:AddDropdown("TeamChanger",{Title="Change Teams/Roles",Values={"Home Team","Away Team","Home Team GK","Away Team GK"},Multi=false,Default=1,Callback=function(v)local m={["Home Team"]="Home",["Away Team"]="Away",["Home Team GK"]="Home GK",["Away Team GK"]="Away GK"}local t=m[v]if game.Teams:FindFirstChild(t)then player.Team=game.Teams[t]else player:SetAttribute("TeamRole",t)end end})
+
+RunService.Heartbeat:Connect(function()
+if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart")then return end
+local hrp=player.Character.HumanoidRootPart
+local ball=getBall()
+if not ball then return end
+
+if reachOn then
+hitbox.CFrame=hrp.CFrame
+hitbox.Size=Vector3.new(reachDist,reachDist,reachDist)
+box.Transparency=visOn and 0.6 or 1
+if (ball.Position-hrp.Position).Magnitude<=reachDist+3 then
+local limbs={}
+for _,name in {"LeftFoot","RightFoot","LeftLowerLeg","RightLowerLeg","Left Leg","Right Leg"}do table.insert(limbs,player.Character:FindFirstChild(name))end
+for _,limb in limbs do if limb then 
+firetouchinterest(limb,ball,0)
+firetouchinterest(limb,ball,1)
+end end
+end
+end
+
+if gkReachOn then
+gkHitbox.CFrame=hrp.CFrame
+gkHitbox.Size=Vector3.new(gkReachDist,gkReachDist,gkReachDist)
+gkBox.Transparency=gkVisOn and 0.5 or 1
+if (ball.Position-hrp.Position).Magnitude<=gkReachDist+5 then
+local gkLimbs={}
+for _,name in {"RightHand","LeftHand","RightLowerArm","LeftLowerArm","RightUpperArm","LeftUpperArm"}do table.insert(gkLimbs,player.Character:FindFirstChild(name))end
+for _,limb in gkLimbs do if limb then
+firetouchinterest(limb,ball,0)
+firetouchinterest(limb,ball,1)
+end end
+end
+end
+
+if stamOn then
+pcall(function()
+local s=player.PlayerScripts.controllers.movementController.stamina
+s.Value=100
+if not staminaConnection then staminaConnection=s:GetPropertyChangedSignal("Value"):Connect(function()s.Value=100 end)end
+end)
+for _,v in player:GetDescendants()do if(v:IsA("NumberValue")or v:IsA("IntValue"))and(v.Name:lower():find("stam")or v.Name:lower():find("energ"))then v.Value=math.huge end end
+else
+if staminaConnection then staminaConnection:Disconnect()staminaConnection=nil end
+end
+
+if(predOn or advPred)and ball then
+if not workspace:FindFirstChild("a1qPred")then
+predLine=Instance.new("Part",workspace)
+predLine.Name="a1qPred"
+predLine.Anchored=true
+predLine.CanCollide=false
+predLine.Material="Neon"
+predLine.Color=Color3.fromRGB(0,255,255)
+else predLine=workspace.a1qPred end
+local vel=ball.AssemblyLinearVelocity
+local predPos=ball.Position+vel*0.5
+local mid=(ball.Position+predPos)/2
+predLine.Size=Vector3.new(thick,thick,(ball.Position-predPos).Magnitude)
+predLine.CFrame=CFrame.new(mid,predPos)
+if advPred then
+local future=ball.Position+vel*0.4
+local sp,on=Camera:WorldToViewportPoint(future)
+if on then
+dot.Position=Vector2.new(sp.X,sp.Y)
+dot.Visible=true
+timeLabel.Text=string.format("%.2fs",(hrp.Position-future).Magnitude/vel.Magnitude)
+timeLabel.Position=Vector2.new(sp.X,sp.Y+25)
+timeLabel.Visible=true
+else dot.Visible=false timeLabel.Visible=false end
+else dot.Visible=false timeLabel.Visible=false end
+else
+if predLine then predLine:Destroy()predLine=nil end
+dot.Visible=false timeLabel.Visible=false
+end
+end)
+
+Fluent:Notify({Title="a1q Hub",Content="LEG REACH 100% FIXED - No more ball lag/drop ever again",Duration=8})
