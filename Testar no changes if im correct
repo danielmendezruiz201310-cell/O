@@ -1,0 +1,801 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+local Workspace = game:GetService("Workspace")
+local player = Players.LocalPlayer
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local screenSize = workspace.CurrentCamera.ViewportSize
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+local LoadingFrame = Instance.new("Frame")
+LoadingFrame.Size = UDim2.fromScale(1,1)
+LoadingFrame.BackgroundColor3 = Color3.fromRGB(5,5,12)
+LoadingFrame.Parent = ScreenGui
+local LoadingTitle = Instance.new("TextLabel")
+LoadingTitle.Text = "RF24 Privat"
+LoadingTitle.Size = UDim2.new(0, 500, 0, 100)
+LoadingTitle.Position = UDim2.new(0.5, 0, 0.4, 0)
+LoadingTitle.AnchorPoint = Vector2.new(0.5, 0.5)
+LoadingTitle.BackgroundTransparency = 1
+LoadingTitle.TextColor3 = Color3.fromRGB(0, 255, 255)
+LoadingTitle.Font = Enum.Font.GothamBlack
+LoadingTitle.TextSize = 60
+LoadingTitle.Parent = LoadingFrame
+local LoadingSubtitle = Instance.new("TextLabel")
+LoadingSubtitle.Text = "Loading all features..."
+LoadingSubtitle.Size = UDim2.new(0, 500, 0, 50)
+LoadingSubtitle.Position = UDim2.new(0.5, 0, 0.55, 0)
+LoadingSubtitle.AnchorPoint = Vector2.new(0.5, 0.5)
+LoadingSubtitle.BackgroundTransparency = 1
+LoadingSubtitle.TextColor3 = Color3.fromRGB(170, 170, 190)
+LoadingSubtitle.Font = Enum.Font.GothamBold
+LoadingSubtitle.TextSize = 24
+LoadingSubtitle.Parent = LoadingFrame
+local LoadSpinner = Instance.new("ImageLabel")
+LoadSpinner.Size = UDim2.fromOffset(80,80)
+LoadSpinner.Position = UDim2.new(0.5,0,0.7,0)
+LoadSpinner.AnchorPoint = Vector2.new(0.5,0.5)
+LoadSpinner.BackgroundTransparency = 1
+LoadSpinner.Image = "rbxassetid://6034834173"
+LoadSpinner.ImageColor3 = Color3.fromRGB(0,255,255)
+LoadSpinner.Parent = LoadingFrame
+task.spawn(function()
+    while LoadingFrame.Parent do
+        TweenService:Create(LoadSpinner, TweenInfo.new(2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {Rotation = 360}):Play()
+        task.wait()
+    end
+end)
+task.wait(2)
+TweenService:Create(LoadingFrame, TweenInfo.new(1), {BackgroundTransparency = 1}):Play()
+TweenService:Create(LoadingTitle, TweenInfo.new(1), {TextTransparency = 1}):Play()
+TweenService:Create(LoadingSubtitle, TweenInfo.new(1), {TextTransparency = 1}):Play()
+TweenService:Create(LoadSpinner, TweenInfo.new(1), {ImageTransparency = 1}):Play()
+task.wait(1)
+LoadingFrame:Destroy()
+_G.settings = {
+	reachOn = false,
+	visOn = false,
+	reachX = 30,
+	reachY = 30,
+	reachZ = 30,
+	offsetX = 0,
+	offsetY = 0,
+	offsetZ = 0,
+	boxOpacity = 0.6,
+	boxColor = Color3.fromRGB(0, 255, 255),
+	gkReachOn = false,
+	gkVisOn = false,
+	gkReachX = 30,
+	gkReachY = 30,
+	gkReachZ = 30,
+	gkOffsetX = 0,
+	gkOffsetY = 0,
+	gkOffsetZ = 0,
+	gkBoxOpacity = 0.6,
+	gkBoxColor = Color3.fromRGB(255, 0, 255),
+	infStamOn = false,
+	alwaysSprintOn = false,
+	antiRagdollOn = false,
+	walkSpeed = 16,
+	jumpPower = 50,
+	predOn = false,
+	lineThick = 1.5,
+	advPred = false,
+	powershotOn = false,
+	infShotChargeOn = false,
+	bringBallOn = false,
+	autoGoalFixed = false,
+	autoTopBinsOn = false,
+	hotkey = Enum.KeyCode.Insert
+}
+local char = player.Character or player.CharacterAdded:Wait()
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+player.CharacterAdded:Connect(function(c)
+	char = c
+	hum = c:WaitForChild("Humanoid")
+	hrp = c:WaitForChild("HumanoidRootPart")
+end)
+local hitbox = Instance.new("Part")
+hitbox.Name = "ReachBox"
+hitbox.Anchored = true
+hitbox.CanCollide = false
+hitbox.Transparency = 1
+hitbox.Size = Vector3.new(30,30,30)
+hitbox.Parent = Workspace
+local sel = Instance.new("SelectionBox")
+sel.Adornee = hitbox
+sel.Color3 = Color3.fromRGB(0,255,255)
+sel.LineThickness = 0.05
+sel.Transparency = 0.4
+sel.Parent = hitbox
+local gkHitbox = Instance.new("Part")
+gkHitbox.Name = "GKReachBox"
+gkHitbox.Anchored = true
+gkHitbox.CanCollide = false
+gkHitbox.Transparency = 1
+gkHitbox.Size = Vector3.new(30,30,30)
+gkHitbox.Parent = Workspace
+local gkSel = Instance.new("SelectionBox")
+gkSel.Adornee = gkHitbox
+gkSel.Color3 = Color3.fromRGB(255,0,255)
+gkSel.LineThickness = 0.05
+gkSel.Transparency = 0.4
+gkSel.Parent = gkHitbox
+local predLine
+local function getBall()
+	for _,v in CollectionService:GetTagged("Ball")do 
+		if v:IsA("BasePart")then return v end 
+	end
+	for _,v in Workspace:GetDescendants()do
+		if v:IsA("BasePart")and(v.Name:find("Ball")or v.Name:find("Football"))and v.AssemblyLinearVelocity.Magnitude>5 then 
+			return v 
+		end
+	end
+end
+pcall(function()
+    for _,v in pairs(getgc(true))do 
+        if type(v)=="table"and rawget(v,"gkCheck")then 
+            local c=debug.getconstants(v.react)
+            for i,val in pairs(c)do 
+                if val=="ignoreReactDecline"or val=="specialTool"then 
+                    debug.setconstant(v.react,i,"ball")
+                elseif val=="overlapCheck"then 
+                    rawset(v,"check",function()return true end)
+                    debug.setconstant(v.react,i,"check")
+                end 
+            end 
+        end 
+    end
+end)
+local staminaConnection = nil
+local function setupInfiniteStamina()
+	pcall(function()
+		local stamina = player.PlayerScripts.controllers.movementController.stamina
+		if staminaConnection then
+			staminaConnection:Disconnect()
+			staminaConnection = nil
+		end
+		if _G.settings.infStamOn then
+			staminaConnection = stamina.Changed:Connect(function()
+				if _G.settings.infStamOn and stamina.Value < 100 then
+					stamina.Value = 100
+				end
+			end)
+			stamina.Value = 100
+		end
+	end)
+end
+setupInfiniteStamina()
+task.spawn(function()
+	while task.wait(0.5) do
+		pcall(setupInfiniteStamina)
+	end
+end)
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = isMobile and UDim2.fromScale(0.95, 0.85) or UDim2.fromScale(0.38, 0.48)
+MainFrame.Position = UDim2.fromScale(0.5, 0.5)
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 27)
+MainFrame.Parent = ScreenGui
+local MainScale = Instance.new("UIScale")
+MainScale.Scale = isMobile and 0.75 or 1.0
+MainScale.Parent = MainFrame
+local MainAspect = Instance.new("UIAspectRatioConstraint")
+MainAspect.AspectRatio = isMobile and 0.7 or 1.5
+MainAspect.Parent = MainFrame
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 36)
+Header.BackgroundColor3 = Color3.fromRGB(9, 9, 11)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+local HeaderBorder = Instance.new("Frame")
+HeaderBorder.Size = UDim2.new(1, 0, 0, 1)
+HeaderBorder.Position = UDim2.new(0, 0, 1, -1)
+HeaderBorder.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+HeaderBorder.BorderSizePixel = 0
+HeaderBorder.Parent = Header
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.fromOffset(11, 11)
+CloseBtn.Position = UDim2.new(0, 12, 0, 13)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 95, 86)
+CloseBtn.Text = ""
+CloseBtn.AutoButtonColor = false
+CloseBtn.Parent = Header
+local CloseCorner = Instance.new("UICorner", CloseBtn)
+CloseCorner.CornerRadius = UDim.new(1, 0)
+local CloseIcon = Instance.new("TextLabel")
+CloseIcon.Size = UDim2.new(1,0,1,0)
+CloseIcon.BackgroundTransparency = 1
+CloseIcon.Text = ""
+CloseIcon.TextColor3 = Color3.fromRGB(140,30,30)
+CloseIcon.Font = Enum.Font.GothamBold
+CloseIcon.TextSize = 10
+CloseIcon.Parent = CloseBtn
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui.Enabled = false end)
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.fromOffset(11, 11)
+MinBtn.Position = UDim2.new(0, 30, 0, 13)
+MinBtn.BackgroundColor3 = Color3.fromRGB(255, 189, 46)
+MinBtn.Text = ""
+MinBtn.AutoButtonColor = false
+MinBtn.Parent = Header
+local MinCorner = Instance.new("UICorner", MinBtn)
+MinCorner.CornerRadius = UDim.new(1, 0)
+local MinIcon = Instance.new("TextLabel")
+MinIcon.Size = UDim2.new(1,0,1,0)
+MinIcon.BackgroundTransparency = 1
+MinIcon.Text = ""
+MinIcon.TextColor3 = Color3.fromRGB(150,100,0)
+MinIcon.Font = Enum.Font.GothamBold
+MinIcon.TextSize = 9
+MinIcon.Parent = MinBtn
+MinBtn.MouseButton1Click:Connect(function()
+	local newScale = math.clamp(MainScale.Scale - 0.1, 0.4, 2.0)
+	TweenService:Create(MainScale, TweenInfo.new(0.3, Enum.EasingStyle.Quint), {Scale = newScale}):Play()
+end)
+local MaxBtn = Instance.new("TextButton")
+MaxBtn.Size = UDim2.fromOffset(11, 11)
+MaxBtn.Position = UDim2.new(0, 48, 0, 13)
+MaxBtn.BackgroundColor3 = Color3.fromRGB(40, 201, 64)
+MaxBtn.Text = ""
+MaxBtn.AutoButtonColor = false
+MaxBtn.Parent = Header
+local MaxCorner = Instance.new("UICorner", MaxBtn)
+MaxCorner.CornerRadius = UDim.new(1, 0)
+local MaxIcon = Instance.new("TextLabel")
+MaxIcon.Size = UDim2.new(1,0,1,0)
+MaxIcon.BackgroundTransparency = 1
+MaxIcon.Text = ""
+MaxIcon.TextColor3 = Color3.fromRGB(0,100,20)
+MaxIcon.Font = Enum.Font.GothamBold
+MaxIcon.TextSize = 9
+MaxIcon.Parent = MaxBtn
+MaxBtn.MouseButton1Click:Connect(function()
+	local newScale = math.clamp(MainScale.Scale + 0.1, 0.4, 2.0)
+	TweenService:Create(MainScale, TweenInfo.new(0.3, Enum.EasingStyle.Quint), {Scale = newScale}):Play()
+end)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -140, 1, 0)
+Title.Position = UDim2.new(0, 66, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "RF24 Privat - Full Featured"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.Parent = Header
+local dragging, dragStart, startPos = false, nil, nil
+Header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
+		dragging = false 
+	end
+end)
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Size = UDim2.new(1, 0, 1, -36)
+ContentContainer.Position = UDim2.new(0, 0, 0, 36)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.Parent = MainFrame
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 192, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(9, 9, 11)
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = ContentContainer
+local SidebarBorder = Instance.new("Frame")
+SidebarBorder.Size = UDim2.new(0, 1, 1, 0)
+SidebarBorder.Position = UDim2.new(1, -1, 0, 0)
+SidebarBorder.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+SidebarBorder.BorderSizePixel = 0
+SidebarBorder.Parent = Sidebar
+local MenuContainer = Instance.new("Frame")
+MenuContainer.Size = UDim2.new(1, -32, 1, -32)
+MenuContainer.Position = UDim2.new(0, 16, 0, 16)
+MenuContainer.BackgroundTransparency = 1
+MenuContainer.Parent = Sidebar
+local MenuLayout = Instance.new("UIListLayout")
+MenuLayout.Padding = UDim.new(0, 3)
+MenuLayout.Parent = MenuContainer
+local menuItems = {
+	{id = "Player", icon = "rbxassetid://6031068432", label = "Player"},
+	{id = "Movement", icon = "rbxassetid://6031275554", label = "Movement"},
+	{id = "Ball", icon = "rbxassetid://6031094687", label = "Ball"},
+	{id = "AutoGoal", icon = "rbxassetid://6034968431", label = "Auto Goal"},
+	{id = "GKReach", icon = "rbxassetid://6035061117", label = "GK Reach"},
+	{id = "Settings", icon = "rbxassetid://6031265976", label = "Settings"},
+	{id = "Discord", icon = "rbxassetid://10734914982", label = "Join Discord"},
+	{id = "Credits", icon = "rbxassetid://6031071232", label = "Credits"}
+}
+local menuButtons = {}
+local currentTab = "Player"
+for _, item in ipairs(menuItems) do
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 30)
+	btn.BackgroundColor3 = Color3.fromRGB(24, 24, 27)
+	btn.Text = ""
+	btn.AutoButtonColor = false
+	btn.Parent = MenuContainer
+	local corner = Instance.new("UICorner", btn)
+	corner.CornerRadius = UDim.new(0, 6)
+	local icon = Instance.new("ImageLabel")
+	icon.Size = UDim2.fromOffset(16, 16)
+	icon.Position = UDim2.new(0, 12, 0.5, -8)
+	icon.BackgroundTransparency = 1
+	icon.Image = item.icon
+	icon.Parent = btn
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -44, 1, 0)
+	label.Position = UDim2.new(0, 40, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Text = item.label
+	label.TextColor3 = Color3.fromRGB(161, 161, 170)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 13
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = btn
+	btn.MouseButton1Click:Connect(function()
+		currentTab = item.id
+		updateUI()
+	end)
+	menuButtons[item.id] = {button = btn, label = label}
+end
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, -192, 1, 0)
+ContentFrame.Position = UDim2.new(0, 192, 0, 0)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = ContentContainer
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -48, 1, -48)
+ScrollFrame.Position = UDim2.new(0, 24, 0, 24)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 0
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 255, 255)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ScrollFrame.Parent = ContentFrame
+local ContentLayout = Instance.new("UIListLayout")
+ContentLayout.Padding = UDim.new(0, 10)
+ContentLayout.Parent = ScrollFrame
+
+local function createToggle(parent, title, key, order)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 0, 40)
+	frame.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+	frame.LayoutOrder = order
+	frame.Parent = parent
+	local corner = Instance.new("UICorner", frame)
+	corner.CornerRadius = UDim.new(0, 8)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -80, 1, 0)
+	label.Position = UDim2.new(0, 16, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Text = title
+	label.TextColor3 = Color3.fromRGB(212, 212, 216)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 14
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = frame
+	local toggleBg = Instance.new("Frame")
+	toggleBg.Size = UDim2.fromOffset(44, 24)
+	toggleBg.Position = UDim2.new(1, -60, 0.5, -12)
+	toggleBg.BackgroundColor3 = _G.settings[key] and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(63, 63, 70)
+	toggleBg.Parent = frame
+	local toggleCorner = Instance.new("UICorner", toggleBg)
+	toggleCorner.CornerRadius = UDim.new(1, 0)
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.fromOffset(16, 16)
+	knob.Position = _G.settings[key] and UDim2.new(0, 24, 0.5, -8) or UDim2.new(0, 4, 0.5, -8)
+	knob.BackgroundColor3 = Color3.new(1,1,1)
+	knob.Parent = toggleBg
+	local knobCorner = Instance.new("UICorner", knob)
+	knobCorner.CornerRadius = UDim.new(1, 0)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1,0,1,0)
+	btn.BackgroundTransparency = 1
+	btn.Text = ""
+	btn.Parent = frame
+	btn.MouseButton1Click:Connect(function()
+		_G.settings[key] = not _G.settings[key]
+		TweenService:Create(toggleBg, TweenInfo.new(0.2), {
+			BackgroundColor3 = _G.settings[key] and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(63, 63, 70)
+		}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.2), {
+			Position = _G.settings[key] and UDim2.new(0, 24, 0.5, -8) or UDim2.new(0, 4, 0.5, -8)
+		}):Play()
+	end)
+end
+
+local function createSlider(parent, title, key, min, max, step, order)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 0, 56)
+	frame.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+	frame.LayoutOrder = order
+	frame.Parent = parent
+	local corner = Instance.new("UICorner", frame)
+	corner.CornerRadius = UDim.new(0, 8)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.6, 0, 0, 18)
+	label.Position = UDim2.new(0, 16, 0, 8)
+	label.BackgroundTransparency = 1
+	label.Text = title .. ": " .. _G.settings[key]
+	label.TextColor3 = Color3.fromRGB(212, 212, 216)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 13
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = frame
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.new(1, -32, 0, 8)
+	bar.Position = UDim2.new(0, 16, 0, 36)
+	bar.BackgroundColor3 = Color3.fromRGB(63, 63, 70)
+	bar.Parent = frame
+	local barCorner = Instance.new("UICorner", bar)
+	barCorner.CornerRadius = UDim.new(0, 4)
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new((_G.settings[key] - min) / (max - min), 0, 1, 0)
+	fill.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+	fill.Parent = bar
+	local fillCorner = Instance.new("UICorner", fill)
+	fillCorner.CornerRadius = UDim.new(0, 4)
+	local sliderDragging = false
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			sliderDragging = true
+			dragging = false
+			local rel = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+			local val = min + (max - min) * rel
+			_G.settings[key] = step >= 1 and math.round(val) or math.floor(val * 10) / 10
+			fill.Size = UDim2.new(rel, 0, 1, 0)
+			label.Text = title .. ": " .. _G.settings[key]
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if sliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local rel = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+			local val = min + (max - min) * rel
+			_G.settings[key] = step >= 1 and math.round(val) or math.floor(val * 10) / 10
+			fill.Size = UDim2.new(rel, 0, 1, 0)
+			label.Text = title .. ": " .. _G.settings[key]
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then sliderDragging = false end
+	end)
+end
+
+local function createColorPicker(parent, title, key, order)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 0, 48)
+	frame.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+	frame.LayoutOrder = order
+	frame.Parent = parent
+	local corner = Instance.new("UICorner", frame)
+	corner.CornerRadius = UDim.new(0, 8)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -80, 1, 0)
+	label.Position = UDim2.new(0, 16, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Text = title
+	label.TextColor3 = Color3.fromRGB(212, 212, 216)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 14
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = frame
+	local colorPreview = Instance.new("Frame")
+	colorPreview.Size = UDim2.fromOffset(32, 32)
+	colorPreview.Position = UDim2.new(1, -48, 0.5, -16)
+	colorPreview.BackgroundColor3 = _G.settings[key]
+	colorPreview.Parent = frame
+	local colorCorner = Instance.new("UICorner", colorPreview)
+	colorCorner.CornerRadius = UDim.new(0, 6)
+	local colors = {
+		Color3.fromRGB(0, 255, 255),
+		Color3.fromRGB(255, 0, 255),
+		Color3.fromRGB(255, 255, 0),
+		Color3.fromRGB(255, 0, 0),
+		Color3.fromRGB(0, 255, 0),
+		Color3.fromRGB(0, 0, 255),
+	}
+	local colorIndex = 1
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1,0,1,0)
+	btn.BackgroundTransparency = 1
+	btn.Text = ""
+	btn.Parent = frame
+	btn.MouseButton1Click:Connect(function()
+		colorIndex = colorIndex % #colors + 1
+		_G.settings[key] = colors[colorIndex]
+		colorPreview.BackgroundColor3 = _G.settings[key]
+	end)
+end
+
+local function createHeader(parent, text, order)
+	local h = Instance.new("TextLabel")
+	h.Size = UDim2.new(1, 0, 0, 16)
+	h.BackgroundTransparency = 1
+	h.Text = text
+	h.TextColor3 = Color3.fromRGB(161, 161, 170)
+	h.Font = Enum.Font.Gotham
+	h.TextSize = 13
+	h.TextXAlignment = Enum.TextXAlignment.Left
+	h.LayoutOrder = order
+	h.Parent = parent
+end
+
+local function clearContent()
+	for _, child in ScrollFrame:GetChildren() do
+		if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
+	end
+end
+
+function updateUI()
+	clearContent()
+	for id, btn in pairs(menuButtons) do
+		if id == currentTab then
+			btn.button.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+			btn.label.TextColor3 = Color3.new(1,1,1)
+		else
+			btn.button.BackgroundColor3 = Color3.fromRGB(24, 24, 27)
+			btn.label.TextColor3 = Color3.fromRGB(161, 161, 170)
+		end
+	end
+	if currentTab == "Player" then
+		createHeader(ScrollFrame, "REACH SETTINGS", 1)
+		createToggle(ScrollFrame, "Reach Enabled", "reachOn", 2)
+		createToggle(ScrollFrame, "Visualizer", "visOn", 3)
+		createSlider(ScrollFrame, "Reach X", "reachX", 1, 150, 1, 4)
+		createSlider(ScrollFrame, "Reach Y", "reachY", 1, 150, 1, 5)
+		createSlider(ScrollFrame, "Reach Z", "reachZ", 1, 150, 1, 6)
+		createSlider(ScrollFrame, "Offset X", "offsetX", -50, 50, 1, 7)
+		createSlider(ScrollFrame, "Offset Y", "offsetY", -50, 50, 1, 8)
+		createSlider(ScrollFrame, "Offset Z", "offsetZ", -50, 50, 1, 9)
+		createSlider(ScrollFrame, "Box Opacity", "boxOpacity", 0, 1, 0.1, 10)
+		createColorPicker(ScrollFrame, "Box Color", "boxColor", 11)
+	elseif currentTab == "Movement" then
+		createHeader(ScrollFrame, "MOVEMENT SETTINGS", 1)
+		createToggle(ScrollFrame, "Infinite Stamina", "infStamOn", 2)
+		createToggle(ScrollFrame, "Always Sprint", "alwaysSprintOn", 3)
+		createToggle(ScrollFrame, "Anti Ragdoll", "antiRagdollOn", 4)
+		createSlider(ScrollFrame, "Walk Speed", "walkSpeed", 0, 100, 1, 5)
+		createSlider(ScrollFrame, "Jump Power", "jumpPower", 0, 200, 1, 6)
+	elseif currentTab == "Ball" then
+		createHeader(ScrollFrame, "BALL SETTINGS", 1)
+		createToggle(ScrollFrame, "Ball Predictor", "predOn", 2)
+		createSlider(ScrollFrame, "Line Thickness", "lineThick", 0.2, 10, 0.1, 3)
+		createToggle(ScrollFrame, "Ball Magnet", "bringBallOn", 4)
+		createToggle(ScrollFrame, "Powershot", "powershotOn", 5)
+		createToggle(ScrollFrame, "Infinite Charge", "infShotChargeOn", 6)
+	elseif currentTab == "AutoGoal" then
+		createHeader(ScrollFrame, "AUTO GOAL SETTINGS", 1)
+		createToggle(ScrollFrame, "Auto Goal", "autoGoalFixed", 2)
+		createToggle(ScrollFrame, "Auto Top Bins", "autoTopBinsOn", 3)
+	elseif currentTab == "GKReach" then
+		createHeader(ScrollFrame, "GK REACH SETTINGS", 1)
+		createToggle(ScrollFrame, "Reach Enabled", "gkReachOn", 2)
+		createToggle(ScrollFrame, "Visualizer", "gkVisOn", 3)
+		createSlider(ScrollFrame, "Reach X", "gkReachX", 1, 150, 1, 4)
+		createSlider(ScrollFrame, "Reach Y", "gkReachY", 1, 150, 1, 5)
+		createSlider(ScrollFrame, "Reach Z", "gkReachZ", 1, 150, 1, 6)
+		createSlider(ScrollFrame, "Offset X", "gkOffsetX", -50, 50, 1, 7)
+		createSlider(ScrollFrame, "Offset Y", "gkOffsetY", -50, 50, 1, 8)
+		createSlider(ScrollFrame, "Offset Z", "gkOffsetZ", -50, 50, 1, 9)
+		createSlider(ScrollFrame, "Box Opacity", "gkBoxOpacity", 0, 1, 0.1, 10)
+		createColorPicker(ScrollFrame, "Box Color", "gkBoxColor", 11)
+	elseif currentTab == "Settings" then
+		createHeader(ScrollFrame, "UI SETTINGS", 1)
+		local hotkeyFrame = Instance.new("Frame")
+		hotkeyFrame.Size = UDim2.new(1, 0, 0, 52)
+		hotkeyFrame.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+		hotkeyFrame.LayoutOrder = 2
+		hotkeyFrame.Parent = ScrollFrame
+		local hotkeyCorner = Instance.new("UICorner", hotkeyFrame)
+		hotkeyCorner.CornerRadius = UDim.new(0, 8)
+		local hotkeyTitle = Instance.new("TextLabel")
+		hotkeyTitle.Size = UDim2.new(1, -32, 0, 20)
+		hotkeyTitle.Position = UDim2.new(0, 16, 0, 8)
+		hotkeyTitle.BackgroundTransparency = 1
+		hotkeyTitle.Text = "Toggle UI Key"
+		hotkeyTitle.TextColor3 = Color3.fromRGB(212, 212, 216)
+		hotkeyTitle.Font = Enum.Font.Gotham
+		hotkeyTitle.TextSize = 14
+		hotkeyTitle.TextXAlignment = Enum.TextXAlignment.Left
+		hotkeyTitle.Parent = hotkeyFrame
+		local bindButton = Instance.new("TextButton")
+		bindButton.Size = UDim2.new(1, -32, 0, 24)
+		bindButton.Position = UDim2.new(0, 16, 0, 28)
+		bindButton.BackgroundColor3 = Color3.fromRGB(63, 63, 70)
+		bindButton.Text = _G.settings.hotkey.Name
+		bindButton.TextColor3 = Color3.fromRGB(212, 212, 216)
+		bindButton.Font = Enum.Font.GothamBold
+		bindButton.TextSize = 14
+		bindButton.AutoButtonColor = false
+		bindButton.Parent = hotkeyFrame
+		local bindCorner = Instance.new("UICorner", bindButton)
+		bindCorner.CornerRadius = UDim.new(0, 6)
+		local isBinding = false
+		local bindConnection
+		bindButton.MouseButton1Click:Connect(function()
+			if isBinding then return end
+			isBinding = true
+			bindButton.Text = "Press any key..."
+			bindButton.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+			bindButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+			bindConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+				if gameProcessed then return end
+				if input.UserInputType == Enum.UserInputType.Keyboard then
+					_G.settings.hotkey = input.KeyCode
+					bindButton.Text = input.KeyCode.Name
+					bindButton.BackgroundColor3 = Color3.fromRGB(63, 63, 70)
+					bindButton.TextColor3 = Color3.fromRGB(212, 212, 216)
+					isBinding = false
+					if bindConnection then
+						bindConnection:Disconnect()
+						bindConnection = nil
+					end
+				end
+			end)
+			task.delay(5, function()
+				if isBinding then
+					bindButton.Text = _G.settings.hotkey.Name
+					bindButton.BackgroundColor3 = Color3.fromRGB(63, 63, 70)
+					bindButton.TextColor3 = Color3.fromRGB(212, 212, 216)
+					isBinding = false
+					if bindConnection then
+						bindConnection:Disconnect()
+						bindConnection = nil
+					end
+				end
+			end)
+		end)
+	elseif currentTab == "Discord" then
+		createHeader(ScrollFrame, "JOIN OUR COMMUNITY", 1)
+		local discordFrame = Instance.new("Frame")
+		discordFrame.Size = UDim2.new(1, 0, 0, 100)
+		discordFrame.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+		discordFrame.Parent = ScrollFrame
+		local discordCorner = Instance.new("UICorner", discordFrame)
+		discordCorner.CornerRadius = UDim.new(0, 8)
+		local discordTitle = Instance.new("TextLabel")
+		discordTitle.Size = UDim2.new(1, -24, 0, 24)
+		discordTitle.Position = UDim2.new(0, 12, 0, 20)
+		discordTitle.BackgroundTransparency = 1
+		discordTitle.Text = "Join RF24 Discord!"
+		discordTitle.TextColor3 = Color3.new(1, 1, 1)
+		discordTitle.Font = Enum.Font.GothamBold
+		discordTitle.TextSize = 16
+		discordTitle.Parent = discordFrame
+		local joinButton = Instance.new("TextButton")
+		joinButton.Size = UDim2.new(1, -24, 0, 40)
+		joinButton.Position = UDim2.new(0, 12, 0, 52)
+		joinButton.BackgroundColor3 = Color3.new(1, 1, 1)
+		joinButton.Text = "Copy Discord Link"
+		joinButton.TextColor3 = Color3.fromRGB(88, 101, 242)
+		joinButton.Font = Enum.Font.GothamBold
+		joinButton.TextSize = 15
+		joinButton.AutoButtonColor = false
+		joinButton.Parent = discordFrame
+		local joinCorner = Instance.new("UICorner", joinButton)
+		joinCorner.CornerRadius = UDim.new(0, 10)
+		joinButton.MouseButton1Click:Connect(function()
+			pcall(function()
+				setclipboard("https://discord.gg/rUB6rAaP")
+			end)
+			joinButton.Text = "Link Copied!"
+			TweenService:Create(joinButton, TweenInfo.new(0.3), {
+				BackgroundColor3 = Color3.fromRGB(67, 181, 129)
+			}):Play()
+			task.delay(3, function()
+				joinButton.Text = "Copy Discord Link"
+				TweenService:Create(joinButton, TweenInfo.new(0.5), {
+					BackgroundColor3 = Color3.new(1, 1, 1)
+				}):Play()
+			end)
+		end)
+	elseif currentTab == "Credits" then
+		createHeader(ScrollFrame, "CREDITS", 1)
+		local creditsFrame = Instance.new("Frame")
+		creditsFrame.Size = UDim2.new(1, 0, 0, 100)
+		creditsFrame.BackgroundColor3 = Color3.fromRGB(39, 39, 42)
+		creditsFrame.Parent = ScrollFrame
+		local creditsCorner = Instance.new("UICorner", creditsFrame)
+		creditsCorner.CornerRadius = UDim.new(0, 8)
+		local creditsTitle = Instance.new("TextLabel")
+		creditsTitle.Size = UDim2.new(1, -20, 0, 18)
+		creditsTitle.Position = UDim2.new(0, 10, 0, 10)
+		creditsTitle.BackgroundTransparency = 1
+		creditsTitle.Text = "RF24 Privat - Full Featured"
+		creditsTitle.TextColor3 = Color3.fromRGB(0, 255, 255)
+		creditsTitle.Font = Enum.Font.GothamBold
+		creditsTitle.TextSize = 15
+		creditsTitle.TextXAlignment = Enum.TextXAlignment.Left
+		creditsTitle.Parent = creditsFrame
+		local creditsDesc = Instance.new("TextLabel")
+		creditsDesc.Size = UDim2.new(1, -20, 0, 80)
+		creditsDesc.Position = UDim2.new(0, 10, 0, 28)
+		creditsDesc.BackgroundTransparency = 1
+		creditsDesc.Text = "• Reach System with Visualizer\n• Ball Predictor\n• Movement Boosts\n• Auto Goal\n• GK Features"
+		creditsDesc.TextColor3 = Color3.fromRGB(113, 113, 122)
+		creditsDesc.Font = Enum.Font.Gotham
+		creditsDesc.TextSize = 13
+		creditsDesc.TextXAlignment = Enum.TextXAlignment.Left
+		creditsDesc.TextYAlignment = Enum.TextYAlignment.Top
+		creditsDesc.Parent = creditsFrame
+	end
+end
+
+RunService.Heartbeat:Connect(function()
+	if _G.settings.reachOn and hrp then
+		hitbox.CFrame = hrp.CFrame * CFrame.new(_G.settings.offsetX, _G.settings.offsetY, _G.settings.offsetZ)
+		hitbox.Size = Vector3.new(_G.settings.reachX, _G.settings.reachY, _G.settings.reachZ)
+		sel.Transparency = _G.settings.visOn and (1 - _G.settings.boxOpacity) or 1
+		sel.Color3 = _G.settings.boxColor
+		local parts = Workspace:GetPartBoundsInBox(hitbox.CFrame, hitbox.Size)
+		for _,part in ipairs(parts) do
+			if part ~= hitbox and part.Parent ~= char then
+				local limbs = {"RightFoot","LeftFoot","Right Leg","Left Leg","RightHand","LeftHand","Head","UpperTorso","LowerTorso","HumanoidRootPart"}
+				for _,limbName in ipairs(limbs) do
+					local limb = char:FindFirstChild(limbName)
+					if limb then
+						firetouchinterest(limb, part, 0)
+						firetouchinterest(limb, part, 1)
+					end
+				end
+			end
+		end
+	else
+		hitbox.Size = Vector3.new(0,0,0)
+	end
+	if _G.settings.bringBallOn then
+		local ball = getBall()
+		if ball and hrp then
+			ball.CFrame = hrp.CFrame * CFrame.new(0, 2, -3)
+			ball.AssemblyLinearVelocity = Vector3.new(0,0,0)
+		end
+	end
+	if _G.settings.gkReachOn and hrp then
+		gkHitbox.CFrame = hrp.CFrame * CFrame.new(_G.settings.gkOffsetX, _G.settings.gkOffsetY, _G.settings.gkOffsetZ)
+		gkHitbox.Size = Vector3.new(_G.settings.gkReachX, _G.settings.gkReachY, _G.settings.gkReachZ)
+		gkSel.Transparency = _G.settings.gkVisOn and (1 - _G.settings.gkBoxOpacity) or 1
+		gkSel.Color3 = _G.settings.gkBoxColor
+		local parts = Workspace:GetPartBoundsInBox(gkHitbox.CFrame, gkHitbox.Size)
+		for _,part in ipairs(parts) do
+			if part ~= gkHitbox and part ~= hitbox and part.Parent ~= char then
+				local limbs = {"RightFoot","LeftFoot","Right Leg","Left Leg","RightHand","LeftHand","Head","UpperTorso","LowerTorso","HumanoidRootPart"}
+				for _,limbName in ipairs(limbs) do
+					local limb = char:FindFirstChild(limbName)
+					if limb then
+						firetouchinterest(limb, part, 0)
+						firetouchinterest(limb, part, 1)
+					end
+				end
+			end
+		end
+	else
+		gkHitbox.Size = Vector3.new(0,0,0)
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if not gp and input.KeyCode == _G.settings.hotkey then
+		ScreenGui.Enabled = not ScreenGui.Enabled
+	end
+end)
+
+updateUI()
