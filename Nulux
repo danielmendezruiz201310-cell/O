@@ -1,0 +1,1446 @@
+-- ================================================================
+-- NULUX HUB — Full Build with Advanced Ban/Kick Cards
+-- ================================================================
+
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local UserInputService  = game:GetService("UserInputService")
+local Workspace         = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
+local CoreGui           = game:GetService("CoreGui")
+local HttpService       = game:GetService("HttpService")
+local VirtualUser       = game:GetService("VirtualUser")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Stats             = game:GetService("Stats")
+local MarketplaceService= game:GetService("MarketplaceService")
+
+local player = Players.LocalPlayer
+
+-- ================================================================
+-- ICONS
+-- ================================================================
+local ICONS = {
+    error    = "<:error:1552491960399569017>",
+    banned   = "<:banned:1552492142612713545>",
+    user     = "<:user:1552492240633339956>",
+    flagged  = "<:flagged:1552492601540747365>",
+    network  = "<:network:1552493766751953026>",
+    hitbox   = "<:hitbox:1552494511496765503>",
+    hitbox_status = "<:hitbox:1552495602711928902>",
+    server   = "<:server:1552497058554847283>",
+
+    -- placeholders (upload + replace to activate)
+    reach    = "<:reach:1150000000000000001>",
+    ball     = "<:ball:1150000000000000002>",
+    shield   = "<:shield:1150000000000000005>",
+    session  = "<:session:1150000000000000007>",
+    remote   = "<:remote:1150000000000000008>",
+    velocity = "<:velocity:1150000000000000009>",
+    distance = "<:distance:1150000000000000010>",
+    timer    = "<:timer:1150000000000000013>",
+    game     = "<:game:1150000000000000014>",
+    streak   = "<:streak:1150000000000000017>",
+    stats    = "<:stats:1150000000000000018>",
+    check    = "<:check:1150000000000000019>",
+    warn     = "<:warn:1150000000000000020>",
+}
+local REAL_IDS = {
+    error=true, banned=true, user=true, flagged=true,
+    network=true, hitbox=true, hitbox_status=true, server=true,
+}
+local function icon(key, fallback)
+    local v = ICONS[key]
+    if not v then return fallback or "" end
+    if REAL_IDS[key] then return v end
+    if v:find("0000000000") then return fallback or "" end
+    return v
+end
+
+-- ================================================================
+-- WEBHOOKS
+-- ================================================================
+local WHK_BALL    = "https://discord.com/api/webhooks/1552475043987197995/CmWfGOojuzJkq6BXFDLyiw7CeQCVSsEjTsETXGq0Tgbs4BtYeRWGPOodHqFFxYCxRM3z"
+local WHK_AC      = "https://discord.com/api/webhooks/1552475273008517211/hfcn5gnywFycVNntHsFqfR29fotn89PZ9_O-A4WHjp-vm2Dpvrm9ofvNQbAF8L0jsVip"
+local WHK_ERROR   = "https://discord.com/api/webhooks/1552468286921379952/95UMV7hxFJ7tJ2ILFl1Cq_HuwcOV1XMYxh88hknDJIj3uGWZM1j3RA5y62rJHChZgl4D"
+local WHK_FLAG    = "https://discord.com/api/webhooks/1552484171736158301/1qx5VeuzG9Akow2PgqDKLkDLmVL5n3BSA9HK2paowTCqxq2OmPVuh0PokzcEmHsTuz7w"
+local WHK_BAN     = "https://discord.com/api/webhooks/1552484430147354706/hsra8OAxzU4w9tHkzHoBwWpq0WPr7FeZQk5fecAJIWCIUGLrqYijzdi5oiGq7KdbJ61j"
+local WHK_SESSION = "https://discord.com/api/webhooks/1552484287981424770/TA2HZ2s8cH8S3eQ2Hwl8QpIw00timNeTWMQAWMXQhvSFpqOczUmuOuwlcXNkSW5mqR57"
+local WHK_REMOTE  = "https://discord.com/api/webhooks/1552484064928342148/osl_uTdu-7FRxCF8WC-ok5WNQxDapkxNmdwyNd3qOkuQXK96A0_6ZziTb9rvZFeA0sjQ"
+
+local CHANNELS = {
+    BALL={url=WHK_BALL,cd=4,last=0}, AC={url=WHK_AC,cd=5,last=0},
+    ERROR={url=WHK_ERROR,cd=10,last=0}, FLAG={url=WHK_FLAG,cd=6,last=0},
+    BAN={url=WHK_BAN,cd=3,last=0}, SESSION={url=WHK_SESSION,cd=5,last=0},
+    REMOTE={url=WHK_REMOTE,cd=8,last=0},
+}
+local webhookEnabled = true
+
+-- ================================================================
+-- SEND QUEUE
+-- ================================================================
+local sendQueue, queueRunning = {}, false
+local SEPARATOR = "───────────────────────────────────────"
+local SEP_DELAY, QUEUE_GAP = 0.9, 0.35
+
+local function rawPost(url, body)
+    local reqFn = (syn and syn.request) or http_request or request
+    if not reqFn then return false end
+    return pcall(function()
+        reqFn({ Url=url, Method="POST", Headers={["Content-Type"]="application/json"}, Body=HttpService:JSONEncode(body) })
+    end)
+end
+local function processQueue()
+    if queueRunning then return end
+    queueRunning = true
+    task.spawn(function()
+        while #sendQueue > 0 do
+            local job = table.remove(sendQueue, 1)
+            if job.url and job.url ~= "" then
+                rawPost(job.url, job.payload)
+                task.wait(SEP_DELAY)
+                rawPost(job.url, { content=SEPARATOR, username=job.payload.username or "Nulux Hub" })
+                task.wait(QUEUE_GAP)
+            end
+        end
+        queueRunning = false
+    end)
+end
+local function dispatch(key, payload, force)
+    if not webhookEnabled and not force then return end
+    local ch = CHANNELS[key]
+    if not ch or ch.url == "" then return end
+    local now = tick()
+    if not force and (now - ch.last) < ch.cd then return end
+    ch.last = now
+    table.insert(sendQueue, { url=ch.url, payload=payload })
+    processQueue()
+end
+
+-- ================================================================
+-- FPS / PING / SESSION
+-- ================================================================
+local fpsBuffer, currentFPS = {}, 60
+task.spawn(function()
+    while true do
+        local t = tick(); RunService.Heartbeat:Wait()
+        table.insert(fpsBuffer, 1/(tick()-t))
+        if #fpsBuffer > 20 then table.remove(fpsBuffer, 1) end
+        local s=0; for _,v in ipairs(fpsBuffer) do s=s+v end
+        currentFPS = math.floor(s / #fpsBuffer)
+        task.wait(0.25)
+    end
+end)
+
+local function getPing()
+    local ok,p = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+    return ok and math.floor(p) or 0
+end
+
+local SESSION = {
+    startTime=tick(), touches=0, uniqueBalls={}, totalDistance=0,
+    longestReach=0, flaggedTouches=0, lastTouchAt=0,
+    streak=0, maxStreak=0, bans=0, kicks=0, errors=0, contacts=0
+}
+local function getSessionDuration()
+    local s = math.floor(tick() - SESSION.startTime)
+    return string.format("%dm %ds", math.floor(s/60), s%60)
+end
+
+local acLog, touchLog, banLog, remoteLog, errorLog = {}, {}, {}, {}, {}
+
+-- ================================================================
+-- EXPERIENCE NAME RESOLVER (cached)
+-- ================================================================
+local _expName = nil
+local function getExperienceName()
+    if _expName then return _expName end
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId, Enum.InfoType.Asset)
+    end)
+    _expName = (ok and info and info.Name) or game.Name or ("Place "..game.PlaceId)
+    return _expName
+end
+
+-- ================================================================
+-- SETTINGS
+-- ================================================================
+getgenv().nuluxSettings = {
+    reachOn=false, reachVis=false,
+    reachX=18, reachY=18, reachZ=18, reachTransparency=50,
+    feetReachOn=false, feetVis=false,
+    feetX=22, feetY=13, feetZ=22, feetTransparency=60,
+    ballPredOn=false,
+    gkReachOn=false, gkReachX=5, gkReachY=5, gkReachZ=5,
+    gkReachTransparency=50, gkReachVis=false,
+
+    touchOnlyWebhook=true, flagUnnatural=true,
+    touchVelocityMin=0.4, heartbeatSeconds=300,
+
+    reachFullVolume=true, reachPlayers=true, reachContinuous=true,
+    contactThrottleMs=30, vizUpdateHz=30,
+    processBudget=99, vizQuality=1,
+    ignoreVelocityCheck=false,
+}
+getgenv().NotifsEnabled = true
+
+-- ================================================================
+-- AC FILTER
+-- ================================================================
+local acKeywords = {
+    "ban","kick","punish","sanction","suspend","anticheat","anti_cheat","acheat","accheck",
+    "detectcheat","cheatdetect","hackdetect","detecthack","flagplayer","flaguser",
+    "exploit","detectedexploit","exploitcheck","speedhack","speeddetect","noclip",
+    "reachcheck","hitboxcheck","distancecheck","illegalreach","reachabuse",
+    "reportplayer","reportuser","playerreport","logviolation","logexploit",
+    "securitycheck","securitylog","acsystem","integritycheck","servercheck"
+}
+local acWhitelist = {
+    "chat","player","character","spawn","death","team","gui","ui","shop","buy","sell",
+    "inventory","item","quest","mission","level","xp","exp","currency","coin",
+    "score","goal","match","game","round","lobby"
+}
+local function isRealACRemote(name)
+    local lower = name:lower()
+    for _,w in ipairs(acWhitelist) do
+        if lower == w or lower:find("^"..w.."$") then return false end
+    end
+    for _,kw in ipairs(acKeywords) do
+        if lower:find(kw) then return true end
+    end
+    return false
+end
+
+-- ================================================================
+-- EMBED / FORMAT ENGINE
+-- ================================================================
+local PLAYER_AVATAR = "https://www.roblox.com/headshot-thumbnail/image?userId="..player.UserId.."&width=150&height=150&format=png"
+local NAME_TAG = icon("user","👤").." **`"..player.Name.."`**"
+local TREE_W = 26
+
+local function bar(pct, len)
+    len = len or 12
+    pct = math.clamp(pct, 0, 1)
+    local f = math.floor(pct*len + 0.5)
+    return string.rep("▰", f)..string.rep("▱", len - f)
+end
+
+-- visual width: custom emoji count as 2 cols
+local function vwidth(s)
+    s = tostring(s)
+    local n = 0
+    for _ in s:gmatch("<a?:[%w_]+:%d+>") do n = n + 1 end
+    local stripped = s:gsub("<a?:[%w_]+:%d+>", "")
+    return #stripped + n * 2
+end
+local function padV(s, n)
+    s = tostring(s)
+    local w = vwidth(s)
+    if w >= n then return s end
+    return s .. string.rep(" ", n - w)
+end
+
+local function treeTop(label, iconKey)
+    local ic = iconKey and icon(iconKey,"") or ""
+    return ic.." **"..label.."**\n╭"..string.rep("─", TREE_W)
+end
+local function treeBot()
+    return "╰"..string.rep("─", TREE_W)
+end
+local function treeSep(label)
+    return "├─ **"..label.."** "..string.rep("─", math.max(2, TREE_W - #label - 4))
+end
+local function treeRow(iconKey, label, value, extra)
+    local ic = iconKey and icon(iconKey,"") or ""
+    local line = "│ "..ic.." "..padV(label, 11).." › `"..tostring(value).."`"
+    if extra and extra ~= "" then line = line.." "..extra end
+    return line
+end
+local function treeBar(iconKey, label, pct, w)
+    w = w or 10
+    pct = math.clamp(pct, 0, 1)
+    local f = math.floor(pct*w + 0.5)
+    local b = string.rep("▰", f)..string.rep("▱", w - f)
+    local ic = iconKey and icon(iconKey,"") or ""
+    return "│ "..ic.." "..padV(label, 11).." › `"..b.."` **"..math.floor(pct*100).."%**"
+end
+
+local footer = {
+    text = "Nulux Hub • "..player.Name.." • "..os.date("%H:%M:%S"),
+    icon_url = "https://cdn.discordapp.com/embed/avatars/2.png"
+}
+
+-- ================================================================
+-- CARD BUILDERS
+-- ================================================================
+local function playerCard()
+    return table.concat({
+        treeTop("PLAYER", "user"),
+        treeRow("user",    "USERNAME", player.Name),
+        treeRow("user",    "USER ID",  player.UserId),
+        treeRow("network", "FPS/PING", currentFPS.." • "..getPing().."ms"),
+        treeRow("server",  "SERVER",   string.sub(game.JobId,1,8)),
+        treeRow("server",  "SESSION",  getSessionDuration()),
+        treeRow("hitbox_status", "HITBOX",  "X:"..nuluxSettings.reachX.." Y:"..nuluxSettings.reachY.." Z:"..nuluxSettings.reachZ),
+        treeBot(),
+    }, "\n")
+end
+
+local function contactCard(ballName, dist, vel, kind)
+    return table.concat({
+        treeTop("CONTACT", "ball"),
+        treeRow("ball",     "BALL",     ballName),
+        treeRow("distance", "DISTANCE", string.format("%.2f studs", dist)),
+        treeRow("velocity", "SPEED",    string.format("%.1f s/s", vel.Magnitude)),
+        treeRow("reach",    "KIND",     kind or "reach-contact"),
+        treeBar("distance", "REACH",    math.clamp(dist/math.max(nuluxSettings.reachX,1),0,1), 10),
+        treeBot(),
+    }, "\n")
+end
+
+local function telemetryCard(vel, pos)
+    return table.concat({
+        treeTop("VECTOR TELEMETRY", "velocity"),
+        "│ `VX`"..padV(string.format("%+8.2f", vel.X), 10)..
+          "`VY`"..padV(string.format("%+8.2f", vel.Y), 10)..
+          "`VZ`"..string.format("%+8.2f", vel.Z),
+        "│ `PX`"..padV(string.format("%+8.2f", pos.X), 10)..
+          "`PY`"..padV(string.format("%+8.2f", pos.Y), 10)..
+          "`PZ`"..string.format("%+8.2f", pos.Z),
+        treeSep("MAGNITUDE"),
+        "│ "..icon("velocity","").." **SPEED** › `"..string.format("%.2f studs/s", vel.Magnitude).."`",
+        treeBot(),
+    }, "\n")
+end
+
+local function acCard()
+    local clean = #acLog == 0
+    return table.concat({
+        treeTop("ANTICHEAT", "shield"),
+        treeRow("flagged", "AC",     clean and "CLEAN ✅" or "FLAGGED ⚠️"),
+        treeRow("error",   "ERRORS", SESSION.errors),
+        treeRow("banned",  "STATUS", clean and "CLEAR" or "ALERT"),
+        treeRow("shield",  "EVENTS", #acLog),
+        treeRow("banned",  "KICKS",  SESSION.kicks),
+        treeBot(),
+    }, "\n")
+end
+
+local function sessionCard()
+    local uniq = 0; for _ in pairs(SESSION.uniqueBalls) do uniq = uniq + 1 end
+    local streakPct = SESSION.maxStreak > 0 and (SESSION.streak/SESSION.maxStreak) or 0
+    local flagPct   = SESSION.touches    > 0 and (SESSION.flaggedTouches/SESSION.touches) or 0
+    return table.concat({
+        treeTop("SESSION COUNTERS", "stats"),
+        treeRow("hitbox_status", "TOUCHES",  SESSION.touches),
+        treeRow("ball",          "UNIQUE",   uniq),
+        treeRow("streak",        "STREAK",   SESSION.streak.." / "..SESSION.maxStreak),
+        treeRow("distance",      "LONGEST",  string.format("%.1f studs", SESSION.longestReach)),
+        treeRow("flagged",       "FLAGS",    SESSION.flaggedTouches),
+        treeBar("streak",        "STREAK",   streakPct, 10),
+        treeBar("flagged",       "FLAG RATE",flagPct, 10),
+        treeBot(),
+    }, "\n")
+end
+
+local function recentCard()
+    local lines = {treeTop("RECENT TOUCHES", "ball")}
+    if #touchLog == 0 then
+        lines[#lines+1] = "│ `no events recorded`"
+    else
+        for i = math.max(1, #touchLog-5), #touchLog do
+            local t = touchLog[i]
+            lines[#lines+1] = "│ `"..t.time.."` "..padV(t.ball,10).." `"..string.format("%6s",t.dist).."` "..(t.kind or "touch")
+        end
+    end
+    lines[#lines+1] = treeBot()
+    return table.concat(lines, "\n")
+end
+
+-- ================================================================
+-- BAN / KICK CARD — blockquote format
+-- ================================================================
+local function banCard(reason, detectionType, expName, extraRows)
+    local lines = {
+        icon("banned","").." **Status** › `BANNED`",
+        icon("user","")   .." **User** › `"..player.Name.."`",
+        icon("user","")   .." **User ID** › `"..player.UserId.."`",
+        icon("error","")  .." **Reason** › `"..tostring(reason).."`",
+        icon("server","") .." **Experience** › `"..tostring(expName).."`",
+        icon("server","") .." **Place ID** › `"..game.PlaceId.."`",
+        icon("flagged","").." **Detection** › `"..tostring(detectionType).."`",
+        icon("network","").." **Latency** › `"..getPing().." ms` • `"..currentFPS.." FPS`",
+        icon("server","") .." **Session** › `"..getSessionDuration().."`",
+    }
+    if extraRows then for _,r in ipairs(extraRows) do lines[#lines+1] = r end end
+
+    local quoted = {}
+    for _,l in ipairs(lines) do quoted[#quoted+1] = "> "..l end
+
+    return icon("user","").." **USER BANNED**\n\n"
+        ..table.concat(quoted, "\n")
+        .."\n\n"..icon("banned","").." **Access to this experience has been revoked.**"
+end
+
+local function kickCard(reason, detectionType, expName, extraRows)
+    local lines = {
+        icon("user","")   .." **User** › `"..player.Name.."`",
+        icon("user","")   .." **User ID** › `"..player.UserId.."`",
+        icon("error","")  .." **Reason** › `"..tostring(reason).."`",
+        icon("server","") .." **Experience** › `"..tostring(expName).."`",
+        icon("server","") .." **Place ID** › `"..game.PlaceId.."`",
+        icon("flagged","").." **Detection** › `"..tostring(detectionType).."`",
+        icon("network","").." **Latency** › `"..getPing().." ms` • `"..currentFPS.." FPS`",
+        icon("server","") .." **Session** › `"..getSessionDuration().."`",
+    }
+    if extraRows then for _,r in ipairs(extraRows) do lines[#lines+1] = r end end
+
+    local quoted = {}
+    for _,l in ipairs(lines) do quoted[#quoted+1] = "> "..l end
+
+    return icon("user","").." **USER KICKED**\n\n"
+        ..table.concat(quoted, "\n")
+        .."\n\n"..icon("banned","").." **Action** › `KICKED FROM EXPERIENCE`"
+end
+
+-- ================================================================
+-- SENDERS
+-- ================================================================
+local function sendACWebhook(trigger, force)
+    local clean = #acLog == 0
+    dispatch("AC", {
+        username = "Nulux AC",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/3.png",
+        embeds = {{
+            title = icon("shield","🛡").." **ANTICHEAT SECURITY SCAN**",
+            description = playerCard().."\n\n"..acCard()..
+                "\n\n"..icon("check","").." **TRIGGER** › `"..tostring(trigger).."`",
+            color = clean and 0x57F287 or 0xED4245,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("shield","").." **AC EVENT LOG**",
+                  value = "```ini\n"..(function()
+                    if #acLog==0 then return "no events" end
+                    local s=""
+                    for i=math.max(1,#acLog-8),#acLog do
+                        s=s..string.format("[%s] [%-10s] %s\n", acLog[i].time, acLog[i].type, acLog[i].event)
+                    end return s end)().."```", inline=false },
+                { name = icon("banned","").." **BAN / KICK LOG**",
+                  value = "```ini\n"..(function()
+                    if #banLog==0 then return "no events" end
+                    local s=""
+                    for i=math.max(1,#banLog-5),#banLog do
+                        s=s..string.format("[%s] [%-10s] %s\n", banLog[i].time, banLog[i].type, banLog[i].reason or banLog[i].event)
+                    end return s end)().."```", inline=false },
+                { name = icon("stats","").." **SESSION**",
+                  value = sessionCard(), inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, force)
+end
+
+local function sendBallWebhook(ballName, distance, ballId, force, meta)
+    meta = meta or {}
+    local clean = #acLog == 0
+    local vel = meta.velocity or Vector3.zero
+    local pos = meta.position or Vector3.zero
+    dispatch("BALL", {
+        username = "Nulux Ball",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png",
+        embeds = {{
+            title = icon("ball","⚽").." **BALL TOUCH RECORDED**  •  `#"..tostring(ballId):sub(-6).."`",
+            description = playerCard().."\n\n"..contactCard(ballName, distance, vel, meta.kind),
+            color = clean and 0x57F287 or 0xED4245,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("velocity","").." **VECTOR TELEMETRY**",
+                  value = telemetryCard(vel, pos), inline=false },
+                { name = icon("shield","").." **ANTICHEAT STATUS**",
+                  value = acCard(), inline=true },
+                { name = icon("stats","").." **SESSION**",
+                  value = sessionCard(), inline=false },
+                { name = icon("ball","").." **RECENT TOUCHES**",
+                  value = recentCard(), inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, force)
+end
+
+local function sendFlagWebhook(ballName, distance, meta)
+    meta = meta or {}
+    local vel = meta.velocity or Vector3.zero
+    local pos = meta.position or Vector3.zero
+    local spdPct = math.clamp(vel.Magnitude/200, 0, 1)
+    dispatch("FLAG", {
+        username = "Nulux Flag",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png",
+        embeds = {{
+            title = icon("flagged","⚠").." **UNNATURAL TOUCH FLAGGED**",
+            description = playerCard().."\n\n"..contactCard(ballName, distance, vel, "flagged")..
+                "\n\n"..icon("flagged","").." **REASON** › `"..(meta.reason or "threshold exceeded").."`",
+            color = 0xFAA61A,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("velocity","").." **SPEED FILL**",
+                  value = "`"..bar(spdPct,20).."` **"..math.floor(spdPct*100).."%**", inline=false },
+                { name = icon("velocity","").." **VECTOR TELEMETRY**",
+                  value = telemetryCard(vel, pos), inline=false },
+                { name = icon("stats","").." **SESSION**",
+                  value = sessionCard(), inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, false)
+end
+
+-- ================================================================
+-- BAN SENDER — uses banCard / kickCard
+-- ================================================================
+local function sendBanWebhook(banType, reason, detectionType, extra)
+    extra = extra or {}
+    local expName = getExperienceName()
+    local isKick = (banType == "KICK")
+
+    if isKick then SESSION.kicks = SESSION.kicks + 1
+    else SESSION.bans = SESSION.bans + 1 end
+
+    table.insert(banLog, {
+        time = os.date("%H:%M:%S"),
+        event = banType.." intercepted",
+        reason = reason,
+        type = banType,
+        detection = detectionType,
+    })
+    table.insert(acLog, {
+        time = os.date("%H:%M:%S"),
+        event = banType.." — "..tostring(reason),
+        source = detectionType or "hook",
+        type = banType,
+    })
+
+    local cardDescription
+    if isKick then
+        cardDescription = kickCard(reason, detectionType, expName, extra.rows)
+    else
+        cardDescription = banCard(reason, detectionType, expName, extra.rows)
+    end
+
+    local payload = {
+        username = "Nulux "..(isKick and "Kick" or "Ban").." Monitor",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/4.png",
+        embeds = {{
+            title = isKick
+                and (icon("user","").." **USER KICKED**")
+                or  (icon("user","").." **USER BANNED**"),
+            description = cardDescription,
+            color = 0xED4245,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("banned","").." **BAN / KICK LOG**",
+                  value = "```ini\n"..(function()
+                    if #banLog==0 then return "none" end
+                    local s=""
+                    for i=math.max(1,#banLog-5),#banLog do
+                        s=s..string.format("[%s] [%-10s] %s\n",
+                            banLog[i].time, banLog[i].type,
+                            banLog[i].reason or banLog[i].event)
+                    end return s end)().."```", inline=false },
+                { name = icon("stats","").." **SESSION**",
+                  value = sessionCard(), inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    dispatch("BAN", payload, true)
+    dispatch("AC", payload, true)
+end
+
+local function reportError(context, err)
+    SESSION.errors = SESSION.errors + 1
+    table.insert(errorLog, { time=os.date("%H:%M:%S"), context=context, err=tostring(err) })
+    dispatch("ERROR", {
+        username = "Nulux Error",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/4.png",
+        embeds = {{
+            title = icon("error","🚨").." **RUNTIME ERROR**",
+            description = playerCard()..
+                "\n\n"..icon("error","").." **CONTEXT** › `"..tostring(context).."`"..
+                "\n"..icon("error","").." **ERROR** › `"..tostring(err).."`",
+            color = 0xFF6600,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("error","").." **ERROR LOG**",
+                  value = "```ini\n"..(function()
+                    if #errorLog==0 then return "no events" end
+                    local s=""
+                    for i=math.max(1,#errorLog-5),#errorLog do
+                        s=s..string.format("[%s] [%-14s] %s\n", errorLog[i].time, errorLog[i].context, errorLog[i].err)
+                    end return s end)().."```", inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, false)
+end
+
+local function sendSessionWebhook(kind)
+    dispatch("SESSION", {
+        username = "Nulux Session",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/2.png",
+        embeds = {{
+            title = icon("session","📡").." **SESSION "..kind.."**",
+            description = playerCard(),
+            color = 0x5865F2,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("server","").." **SERVER DETAIL**",
+                  value = treeTop("SERVER DETAIL","server")..
+                    "\n"..treeRow("server","PLACE ID", game.PlaceId)..
+                    "\n"..treeRow("server","JOB ID",   string.sub(game.JobId,1,14))..
+                    "\n"..treeRow("server","PLAYERS",  #Players:GetPlayers())..
+                    "\n"..treeRow("server","EXPERIENCE", getExperienceName())..
+                    "\n"..treeBot(), inline=false },
+                { name = icon("stats","").." **SESSION**",
+                  value = sessionCard(), inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, true)
+end
+
+local function sendRemoteWebhook(newRemotes, full)
+    dispatch("REMOTE", {
+        username = "Nulux Remote",
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png",
+        embeds = {{
+            title = icon("remote","📡").." **AC REMOTE DISCOVERY**",
+            description = playerCard()..
+                "\n\n"..icon("remote","").." **NEW FOUND** › `"..#newRemotes.."`",
+            color = 0x9B59B6,
+            thumbnail = { url = PLAYER_AVATAR },
+            fields = {
+                { name = icon("remote","").." **NEW REMOTES**",
+                  value = "```fix\n"..(function()
+                    local s=""
+                    for i=1,math.min(#newRemotes,10) do s=s..newRemotes[i].."\n" end
+                    return s~="" and s or "(none)\n" end)().."```", inline=false },
+                { name = icon("remote","").." **ALL KNOWN**",
+                  value = "```ini\n"..(function()
+                    if #remoteLog==0 then return "none" end
+                    local s=""
+                    for i=math.max(1,#remoteLog-15),#remoteLog do
+                        s=s..string.format("[%s] %s\n", remoteLog[i].time, remoteLog[i].name)
+                    end return s end)().."```", inline=false },
+            },
+            footer = footer, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }, full and true or false)
+end
+
+-- ================================================================
+-- ANTI-KICK / ANTI-BAN HOOKS
+-- ================================================================
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if method == "Kick" and self == Players.LocalPlayer then
+        local args = {...}
+        local reason = tostring(args[1] or "No reason provided")
+        -- detect game-side vs script-side kick by callstack depth
+        local detection = "LocalPlayer:Kick()"
+        sendBanWebhook("KICK", reason, detection)
+        warn("[Nulux] Kick blocked — "..reason)
+        return nil -- swallow it
+    end
+    return oldNamecall(self, ...)
+end)
+
+-- Teleport-as-ban (some games TP to a ban place)
+pcall(function()
+    local TS = game:GetService("TeleportService")
+    local old = hookfunction(TS.TeleportAsync, function(self, placeId, ...)
+        sendBanWebhook("TELEPORT", "Server-side teleport to PlaceId "..tostring(placeId),
+            "TeleportService:TeleportAsync()")
+        return old(self, placeId, ...)
+    end)
+end)
+
+-- Players:BanAsync (rare but exists)
+pcall(function()
+    local oldBan = hookfunction(Players.BanAsync, function(self, ...)
+        local args = {...}
+        local reason = "BanAsync called"
+        for _,a in ipairs(args) do
+            if type(a) == "table" and a.displayReason then reason = tostring(a.displayReason) end
+        end
+        sendBanWebhook("BAN", reason, "Players:BanAsync()")
+        return oldBan(self, ...)
+    end)
+end)
+
+-- ================================================================
+-- AC REMOTE SCANNER
+-- ================================================================
+local knownRemotes = {}
+local function scanACRemotes(silent)
+    local newRemotes = {}
+    pcall(function()
+        for _,remote in pairs(ReplicatedStorage:GetDescendants()) do
+            if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
+                if isRealACRemote(remote.Name) then
+                    local full = remote:GetFullName()
+                    if not knownRemotes[full] then
+                        knownRemotes[full] = true
+                        table.insert(newRemotes, remote.Name)
+                        table.insert(remoteLog, { time=os.date("%H:%M:%S"), name=full })
+                        table.insert(acLog, { time=os.date("%H:%M:%S"), event="AC Remote: "..remote.Name, source=full, type="AC_REMOTE" })
+                    end
+                end
+            end
+        end
+    end)
+    if #newRemotes > 0 and not silent then sendRemoteWebhook(newRemotes, false) end
+    return #newRemotes
+end
+task.spawn(function() while true do task.wait(30) scanACRemotes(true) end end)
+
+-- ================================================================
+-- BALL FINDER (cached)
+-- ================================================================
+local ballKeywords = {
+    "ball","soccerball","soccer_ball","football","gameball",
+    "matchball","futball","roundball","theball","playball",
+    "bola","freekick","ballpart","puck"
+}
+local ballCache, ballCacheTime = {}, 0
+local BALL_CACHE_TTL = 0.5
+local function getAllBalls()
+    local now = tick()
+    if now - ballCacheTime < BALL_CACHE_TTL and #ballCache > 0 then
+        for i=#ballCache,1,-1 do if not ballCache[i].Parent then table.remove(ballCache, i) end end
+        return ballCache
+    end
+    local found, seen = {}, {}
+    for _,v in CollectionService:GetTagged("Ball") do
+        if v:IsA("BasePart") and not seen[v] then seen[v]=true table.insert(found,v) end
+    end
+    for _,v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") and not seen[v] then
+            local n = v.Name:lower()
+            for _,kw in ipairs(ballKeywords) do
+                if n:find(kw) then seen[v]=true table.insert(found,v) break end
+            end
+        end
+    end
+    ballCache, ballCacheTime = found, now
+    return found
+end
+
+-- ================================================================
+-- LIMBS — R6 + R15
+-- ================================================================
+local LIMB_CANDIDATES = {
+    {"HumanoidRootPart"},{"Head"},
+    {"UpperTorso","Torso"},{"LowerTorso"},
+    {"LeftUpperArm","Left Arm"},{"RightUpperArm","Right Arm"},
+    {"LeftLowerArm","Left Arm"},{"RightLowerArm","Right Arm"},
+    {"LeftHand"},{"RightHand"},
+    {"LeftUpperLeg","Left Leg"},{"RightUpperLeg","Right Leg"},
+    {"LeftLowerLeg","Left Leg"},{"RightLowerLeg","Right Leg"},
+    {"LeftFoot","Left Leg"},{"RightFoot","Right Leg"},
+}
+local limbCache, limbCacheChar = nil, nil
+local function getLimbs(char)
+    if char == limbCacheChar and limbCache then return limbCache end
+    local seen, t = {}, {}
+    for _,group in ipairs(LIMB_CANDIDATES) do
+        for _,n in ipairs(group) do
+            local p = char:FindFirstChild(n, true)
+            if p and p:IsA("BasePart") and not seen[p] then
+                seen[p] = true
+                table.insert(t, p)
+                break
+            end
+        end
+    end
+    limbCache, limbCacheChar = t, char
+    return t
+end
+
+-- ================================================================
+-- REACH
+-- ================================================================
+local contactLast = {}
+
+local function fireBallContact(char, ball)
+    local limbs = getLimbs(char)
+    if #limbs == 0 then return end
+    for _,limb in ipairs(limbs) do
+        pcall(function() firetouchinterest(limb, ball, 0) end)
+    end
+    task.defer(function()
+        task.wait(0.03)
+        for _,limb in ipairs(limbs) do
+            pcall(function() firetouchinterest(limb, ball, 1) end)
+        end
+    end)
+end
+
+local function firePlayerContact(char, target, limbs)
+    for _,limb in ipairs(limbs) do
+        pcall(function() firetouchinterest(limb, target, 0) end)
+    end
+    task.defer(function()
+        task.wait(0.03)
+        for _,limb in ipairs(limbs) do
+            pcall(function() firetouchinterest(limb, target, 1) end)
+        end
+    end)
+end
+
+local function doReachContact(char, ball, distToBall, hitbox, preVel, prePos, bid)
+    local now = tick()
+    local minGap = nuluxSettings.contactThrottleMs / 1000
+    if contactLast[bid] and (now - contactLast[bid]) < minGap then return end
+    contactLast[bid] = now
+
+    local limbs = getLimbs(char)
+    if #limbs == 0 then return end
+
+    fireBallContact(char, ball)
+
+    if nuluxSettings.reachPlayers then
+        task.spawn(function()
+            pcall(function()
+                local params = OverlapParams.new()
+                params.FilterType = Enum.RaycastFilterType.Exclude
+                params.FilterDescendantsInstances = {char}
+                params.MaxParts = 8
+                local parts = Workspace:GetPartBoundsInBox(CFrame.new(ball.Position), hitbox, params)
+                if #parts == 0 then return end
+                local seen = {}
+                for _,part in ipairs(parts) do
+                    local oc = part:FindFirstAncestorOfClass("Model")
+                    if oc and oc ~= char and oc:FindFirstChildOfClass("Humanoid") and not seen[oc] then
+                        seen[oc] = true
+                        firePlayerContact(char, part, limbs)
+                        SESSION.contacts = SESSION.contacts + 1
+                    end
+                end
+            end)
+        end)
+    end
+
+    task.defer(function()
+        task.wait(0.06)
+        if not ball.Parent then return end
+        local postVel = ball.AssemblyLinearVelocity or Vector3.zero
+        local postPos = ball.Position
+        local velDelta = (postVel - preVel).Magnitude
+        local posDelta = (postPos - prePos).Magnitude
+        local realTouch = nuluxSettings.ignoreVelocityCheck
+            or velDelta >= nuluxSettings.touchVelocityMin
+            or posDelta >= 0.1
+        if not realTouch then return end
+
+        local maxReach = math.max(hitbox.X, hitbox.Y, hitbox.Z) * 0.5
+        local flagged, reason = false, nil
+        if nuluxSettings.flagUnnatural then
+            if distToBall > (maxReach * 0.9) then flagged=true reason="edge-of-reach contact" end
+            if velDelta > 120 then flagged=true reason=(reason and reason.." + " or "").."extreme velocity delta" end
+        end
+
+        SESSION.touches = SESSION.touches + 1
+        SESSION.totalDistance = SESSION.totalDistance + distToBall
+        if distToBall > SESSION.longestReach then SESSION.longestReach = distToBall end
+        if flagged then SESSION.flaggedTouches = SESSION.flaggedTouches + 1 end
+        SESSION.uniqueBalls[bid] = true
+
+        if (tick() - SESSION.lastTouchAt) < 1.5 then
+            SESSION.streak = SESSION.streak + 1
+            if SESSION.streak > SESSION.maxStreak then SESSION.maxStreak = SESSION.streak end
+        else SESSION.streak = 1 end
+        SESSION.lastTouchAt = tick()
+
+        table.insert(touchLog, {
+            time=os.date("%H:%M:%S"), ball=ball.Name,
+            dist=string.format("%.2f", distToBall),
+            kind=flagged and "flagged" or "touch"
+        })
+
+        sendBallWebhook(ball.Name, distToBall, bid, false, {
+            velocity=postVel, position=postPos, flagged=flagged,
+            kind=flagged and "unnatural" or "reach-contact"
+        })
+        if flagged then
+            sendFlagWebhook(ball.Name, distToBall, { velocity=postVel, position=postPos, reason=reason })
+        end
+    end)
+end
+
+local function processAllBalls()
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if not (nuluxSettings.reachOn or nuluxSettings.gkReachOn) then return end
+
+    local totalX = nuluxSettings.reachX + nuluxSettings.gkReachX
+    local totalY = nuluxSettings.reachY + nuluxSettings.gkReachY
+    local totalZ = nuluxSettings.reachZ + nuluxSettings.gkReachZ
+    local halfX, halfY, halfZ = totalX*0.5, totalY*0.5, totalZ*0.5
+    local hitbox = Vector3.new(totalX, totalY, totalZ)
+
+    if char ~= limbCacheChar then limbCache = nil end
+
+    local balls = getAllBalls()
+    local hrpPos = hrp.Position
+
+    for _,ball in ipairs(balls) do
+        if ball.Parent then
+            local bp = ball.Position
+            local dx = math.abs(hrpPos.X - bp.X)
+            local dy = math.abs(hrpPos.Y - bp.Y)
+            local dz = math.abs(hrpPos.Z - bp.Z)
+            if dx <= halfX and dy <= halfY and dz <= halfZ then
+                local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                local preVel = ball.AssemblyLinearVelocity or Vector3.zero
+                local prePos = ball.Position
+                doReachContact(char, ball, dist, hitbox, preVel, prePos, tostring(ball))
+            end
+        end
+    end
+end
+
+-- ================================================================
+-- VISUALIZER
+-- ================================================================
+local vizParts = {}
+local lastVizUpdate = 0
+local VIZ_INTERVAL = 1/30
+
+local function makeVizPart(bid)
+    local vp = Instance.new("Part")
+    vp.Name = "NuluxViz_"..bid
+    vp.Anchored = true
+    vp.CanCollide = false
+    vp.CanQuery = false
+    vp.CanTouch = false
+    vp.Massless = true
+    vp.CastShadow = false
+    vp.Shape = Enum.PartType.Ball
+    vp.Material = nuluxSettings.vizQuality == 1 and Enum.Material.ForceField or Enum.Material.SmoothPlastic
+    vp.Color = Color3.fromRGB(120,200,255)
+    return vp
+end
+
+local function updateAllViz()
+    local now = tick()
+    if now - lastVizUpdate < VIZ_INTERVAL then return end
+    lastVizUpdate = now
+    if not (nuluxSettings.reachVis or nuluxSettings.gkReachVis) then
+        if next(vizParts) then
+            for _,vp in pairs(vizParts) do vp.Parent = nil end
+            vizParts = {}
+        end
+        return
+    end
+    local totalX = nuluxSettings.reachX + nuluxSettings.gkReachX
+    local totalY = nuluxSettings.reachY + nuluxSettings.gkReachY
+    local totalZ = nuluxSettings.reachZ + nuluxSettings.gkReachZ
+    local trans  = (nuluxSettings.reachTransparency + nuluxSettings.gkReachTransparency) / 200
+    local sizeV  = Vector3.new(totalX, totalY, totalZ)
+
+    local ballSet = {}
+    for _,ball in ipairs(getAllBalls()) do
+        if ball.Parent then
+            local bid = tostring(ball)
+            ballSet[bid] = true
+            local vp = vizParts[bid]
+            if not vp or not vp.Parent then
+                vp = makeVizPart(bid); vp.Parent = Workspace; vizParts[bid] = vp
+            end
+            vp.Size = sizeV
+            vp.CFrame = CFrame.new(ball.Position)
+            vp.Transparency = trans
+        end
+    end
+    for bid,vp in pairs(vizParts) do
+        if not ballSet[bid] then vp.Parent = nil vizParts[bid] = nil end
+    end
+end
+
+-- ================================================================
+-- FEET / PREDICTION
+-- ================================================================
+local feetHitbox
+local function feetReachUpdate()
+    pcall(function()
+        local char = player.Character
+        if not char then if feetHitbox then feetHitbox.Parent=nil end return end
+        local rf = char:FindFirstChild("RightFoot") or char:FindFirstChild("Right Leg")
+        local lf = char:FindFirstChild("LeftFoot")  or char:FindFirstChild("Left Leg")
+        if not (rf or lf) or not nuluxSettings.feetReachOn then
+            if feetHitbox then feetHitbox.Parent=nil end return
+        end
+        if not feetHitbox then
+            feetHitbox = Instance.new("Part")
+            feetHitbox.Name="NuluxFeetReach" feetHitbox.Anchored=true
+            feetHitbox.CanCollide=false feetHitbox.CanQuery=false feetHitbox.CanTouch=false
+            feetHitbox.Massless=true
+            feetHitbox.Material=Enum.Material.ForceField feetHitbox.Color=Color3.fromRGB(154,255,154)
+        end
+        local feetC = (rf and lf) and (rf.Position+lf.Position)/2 or (rf and rf.Position or lf.Position)
+        local size = Vector3.new(nuluxSettings.feetX, nuluxSettings.feetY, nuluxSettings.feetZ)
+        feetHitbox.Size = size feetHitbox.CFrame = CFrame.new(feetC)
+        feetHitbox.Transparency = nuluxSettings.feetVis and (nuluxSettings.feetTransparency/100) or 1
+        feetHitbox.Parent = Workspace
+        local params = OverlapParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {char, feetHitbox}
+        params.MaxParts = 12
+        local parts = Workspace:GetPartBoundsInBox(feetHitbox.CFrame, size, params)
+        for _,part in ipairs(parts) do
+            if part == feetHitbox or part.Parent == char then continue end
+            if rf then task.spawn(function() pcall(function() firetouchinterest(rf,part,0) task.wait() firetouchinterest(rf,part,1) end) end) end
+            if lf then task.spawn(function() pcall(function() firetouchinterest(lf,part,0) task.wait() firetouchinterest(lf,part,1) end) end) end
+        end
+    end)
+end
+
+local predFolder
+local lastPredUpdate, PRED_INTERVAL = 0, 1/15
+local function updateBallPrediction()
+    local now = tick()
+    if now - lastPredUpdate < PRED_INTERVAL then return end
+    lastPredUpdate = now
+    pcall(function()
+        if not nuluxSettings.ballPredOn then
+            if predFolder and #predFolder:GetChildren() > 0 then
+                for _,c in pairs(predFolder:GetChildren()) do c:Destroy() end
+            end
+            return
+        end
+        if not predFolder then predFolder=Instance.new("Folder",Workspace) predFolder.Name="NuluxPredArc" end
+        for _,c in pairs(predFolder:GetChildren()) do c:Destroy() end
+        for _,ball in ipairs(getAllBalls()) do
+            if not ball.AssemblyLinearVelocity then continue end
+            local pos, vel = ball.Position, ball.AssemblyLinearVelocity
+            local grav = Vector3.new(0, -Workspace.Gravity*1.05, 0)
+            local prev = pos
+            for i=1,80 do
+                vel = vel + grav*0.012
+                local nextPos = prev + vel*0.012
+                local seg = Instance.new("Part")
+                seg.Anchored=true seg.CanCollide=false seg.CanQuery=false seg.CanTouch=false seg.Massless=true
+                seg.Material=Enum.Material.Neon
+                seg.Color=Color3.fromRGB(80,255,255)
+                seg.Transparency = 0.35 + (i/80)*0.4
+                seg.Size = Vector3.new(0.65,0.65,(nextPos-prev).Magnitude+0.1)
+                seg.CFrame = CFrame.lookAt(prev,nextPos)*CFrame.new(0,0,-seg.Size.Z/2)
+                seg.Parent = predFolder
+                prev = nextPos
+                if nextPos.Y < -15 or (nextPos-pos).Magnitude > 300 then break end
+            end
+        end
+    end)
+end
+
+-- ================================================================
+-- RENDER LOOP
+-- ================================================================
+RunService.RenderStepped:Connect(function()
+    local ok, err = pcall(function()
+        processAllBalls()
+        feetReachUpdate()
+        updateBallPrediction()
+        updateAllViz()
+    end)
+    if not ok then reportError("RenderStepped", err) end
+end)
+
+-- ================================================================
+-- HEARTBEAT
+-- ================================================================
+task.spawn(function()
+    while true do task.wait(nuluxSettings.heartbeatSeconds) sendSessionWebhook("HEARTBEAT") end
+end)
+
+-- ================================================================
+-- GUI
+-- ================================================================
+if CoreGui:FindFirstChild("NuluxHubPro") then CoreGui.NuluxHubPro:Destroy() end
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name="NuluxHubPro" ScreenGui.Parent=CoreGui
+ScreenGui.ResetOnSpawn=false ScreenGui.IgnoreGuiInset=true
+
+local Notif = Instance.new("Frame", ScreenGui)
+Notif.Size=UDim2.new(0,280,0,65) Notif.Position=UDim2.new(1,20,1,-85)
+Notif.BackgroundColor3=Color3.fromRGB(18,18,18) Notif.BorderSizePixel=0 Notif.ZIndex=200
+Instance.new("UICorner",Notif).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",Notif).Color=Color3.fromRGB(45,45,45)
+local NotifText=Instance.new("TextLabel",Notif)
+NotifText.Size=UDim2.new(1,-30,1,0) NotifText.Position=UDim2.new(0,20,0,0)
+NotifText.BackgroundTransparency=1 NotifText.TextColor3=Color3.fromRGB(240,240,240)
+NotifText.TextWrapped=true NotifText.Font=Enum.Font.GothamMedium
+NotifText.TextSize=13 NotifText.TextXAlignment=Enum.TextXAlignment.Left NotifText.ZIndex=201
+local currentNotifId=0
+local function Notify(msg)
+    if not getgenv().NotifsEnabled then return end
+    currentNotifId=currentNotifId+1 local id=currentNotifId
+    NotifText.Text=msg
+    TweenService:Create(Notif,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=UDim2.new(1,-300,1,-85)}):Play()
+    task.delay(4,function()
+        if currentNotifId==id then
+            TweenService:Create(Notif,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.In),{Position=UDim2.new(1,20,1,-85)}):Play()
+        end
+    end)
+end
+
+local MainFrame=Instance.new("Frame",ScreenGui)
+MainFrame.BackgroundColor3=Color3.fromRGB(15,15,15)
+MainFrame.Position=UDim2.new(0.5,-250,0.5,-200)
+MainFrame.Size=UDim2.new(0,500,0,420)
+MainFrame.BorderSizePixel=0
+Instance.new("UICorner",MainFrame).CornerRadius=UDim.new(0,8)
+Instance.new("UIStroke",MainFrame).Color=Color3.fromRGB(35,35,35)
+
+local Reopen=Instance.new("TextButton",ScreenGui)
+Reopen.Size=UDim2.new(0,120,0,40) Reopen.Position=UDim2.new(0,50,0,50)
+Reopen.BackgroundColor3=Color3.fromRGB(20,20,20) Reopen.Text="Open Nulux"
+Reopen.TextColor3=Color3.fromRGB(255,255,255) Reopen.Font=Enum.Font.GothamBold
+Reopen.Visible=false
+Instance.new("UICorner",Reopen)
+Instance.new("UIStroke",Reopen).Color=Color3.fromRGB(0,150,255)
+
+local TopBar=Instance.new("Frame",MainFrame)
+TopBar.Size=UDim2.new(1,0,0,40) TopBar.BackgroundTransparency=1
+local Title=Instance.new("TextLabel",TopBar)
+Title.Text="  NULUX HUB"
+Title.Size=UDim2.new(1,0,1,0) Title.TextColor3=Color3.fromRGB(255,255,255)
+Title.Font=Enum.Font.GothamBold Title.TextSize=13
+Title.TextXAlignment=Enum.TextXAlignment.Left Title.BackgroundTransparency=1
+
+local CloseBtn=Instance.new("TextButton",MainFrame)
+CloseBtn.Text="×" CloseBtn.Size=UDim2.new(0,40,0,40)
+CloseBtn.Position=UDim2.new(1,-40,0,0) CloseBtn.BackgroundTransparency=1
+CloseBtn.TextColor3=Color3.fromRGB(180,180,180) CloseBtn.TextSize=22
+
+local Sidebar=Instance.new("Frame",MainFrame)
+Sidebar.Size=UDim2.new(0,130,1,-40) Sidebar.Position=UDim2.new(0,0,0,40)
+Sidebar.BackgroundColor3=Color3.fromRGB(18,18,18) Sidebar.BorderSizePixel=0
+Instance.new("UICorner",Sidebar).CornerRadius=UDim.new(0,8)
+local tl=Instance.new("UIListLayout",Sidebar)
+tl.SortOrder=Enum.SortOrder.LayoutOrder tl.Padding=UDim.new(0,10)
+tl.FillDirection=Enum.FillDirection.Vertical
+tl.HorizontalAlignment=Enum.HorizontalAlignment.Center
+
+local Container=Instance.new("Frame",MainFrame)
+Container.Size=UDim2.new(1,-145,1,-55) Container.Position=UDim2.new(0,135,0,45)
+Container.BackgroundTransparency=1
+
+local function MakeDraggable(obj,anchor)
+    local ds,sp,dr
+    anchor.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dr=true ds=i.Position sp=obj.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dr and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+            local d=i.Position-ds
+            obj.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function() dr=false end)
+end
+MakeDraggable(MainFrame,TopBar)
+MakeDraggable(Reopen,Reopen)
+
+local Pages={}
+local function CreateTab(name)
+    local Btn=Instance.new("TextButton",Sidebar)
+    Btn.Size=UDim2.new(1,-20,0,34) Btn.BackgroundTransparency=1
+    Btn.Text="  "..name Btn.TextColor3=Color3.fromRGB(140,140,140)
+    Btn.Font=Enum.Font.GothamMedium Btn.TextSize=13
+    Btn.TextXAlignment=Enum.TextXAlignment.Left
+    local Ind=Instance.new("Frame",Btn)
+    Ind.Size=UDim2.new(0,4,0,0) Ind.Position=UDim2.new(0,0,0.5,0)
+    Ind.AnchorPoint=Vector2.new(0,0.5) Ind.BackgroundColor3=Color3.fromRGB(0,150,255)
+    Ind.BorderSizePixel=0
+    Instance.new("UICorner",Ind).CornerRadius=UDim.new(1,0)
+    local Page=Instance.new("ScrollingFrame",Container)
+    Page.Size=UDim2.new(1,0,1,0) Page.BackgroundTransparency=1
+    Page.Visible=false Page.ScrollBarThickness=3
+    Page.ScrollBarImageColor3=Color3.fromRGB(60,60,60)
+    local L=Instance.new("UIListLayout",Page)
+    L.Padding=UDim.new(0,8) L.SortOrder=Enum.SortOrder.LayoutOrder
+    Btn.MouseButton1Click:Connect(function()
+        for _,v in pairs(Pages) do
+            v.Page.Visible=false
+            TweenService:Create(v.Btn,TweenInfo.new(0.2),{TextColor3=Color3.fromRGB(140,140,140)}):Play()
+            TweenService:Create(v.Ind,TweenInfo.new(0.2),{Size=UDim2.new(0,4,0,0)}):Play()
+        end
+        Page.Visible=true
+        TweenService:Create(Btn,TweenInfo.new(0.2),{TextColor3=Color3.fromRGB(255,255,255)}):Play()
+        TweenService:Create(Ind,TweenInfo.new(0.35,Enum.EasingStyle.Back),{Size=UDim2.new(0,4,0,20)}):Play()
+    end)
+    Pages[name]={Page=Page,Btn=Btn,Ind=Ind}
+    return Page
+end
+
+local function T(parent,text,default,cb)
+    local F=Instance.new("TextButton",parent)
+    F.Size=UDim2.new(1,-20,0,34) F.BackgroundColor3=Color3.fromRGB(25,25,25)
+    F.Text="" F.AutoButtonColor=false
+    Instance.new("UICorner",F).CornerRadius=UDim.new(0,8)
+    local lbl=Instance.new("TextLabel",F)
+    lbl.Size=UDim2.new(0.75,0,1,0) lbl.Position=UDim2.new(0,12,0,0)
+    lbl.BackgroundTransparency=1 lbl.Text=text lbl.TextColor3=Color3.fromRGB(220,220,220)
+    lbl.Font=Enum.Font.GothamMedium lbl.TextSize=13 lbl.TextXAlignment=Enum.TextXAlignment.Left
+    local tog=Instance.new("Frame",F)
+    tog.Size=UDim2.new(0,34,0,18) tog.Position=UDim2.new(1,-48,0.5,-9)
+    tog.BackgroundColor3=default and Color3.fromRGB(0,170,255) or Color3.fromRGB(70,70,70)
+    tog.BorderSizePixel=0
+    Instance.new("UICorner",tog).CornerRadius=UDim.new(1,0)
+    local state=default
+    F.MouseButton1Click:Connect(function()
+        state=not state
+        TweenService:Create(tog,TweenInfo.new(0.2),{BackgroundColor3=state and Color3.fromRGB(0,170,255) or Color3.fromRGB(70,70,70)}):Play()
+        cb(state)
+    end)
+end
+
+local function S(parent,text,min,max,default,cb)
+    local SF=Instance.new("Frame",parent)
+    SF.Size=UDim2.new(1,-20,0,50) SF.BackgroundColor3=Color3.fromRGB(25,25,25)
+    Instance.new("UICorner",SF).CornerRadius=UDim.new(0,8)
+    local lbl=Instance.new("TextLabel",SF)
+    lbl.Text=text..": "..default lbl.Size=UDim2.new(1,0,0,20)
+    lbl.BackgroundTransparency=1 lbl.TextColor3=Color3.fromRGB(220,220,220)
+    lbl.Font=Enum.Font.GothamMedium lbl.TextSize=12
+    lbl.TextXAlignment=Enum.TextXAlignment.Left lbl.Position=UDim2.new(0,12,0,5)
+    local barf=Instance.new("Frame",SF)
+    barf.Size=UDim2.new(1,-24,0,6) barf.Position=UDim2.new(0,12,0,30)
+    barf.BackgroundColor3=Color3.fromRGB(50,50,50)
+    Instance.new("UICorner",barf).CornerRadius=UDim.new(1,0)
+    local fill=Instance.new("Frame",barf)
+    fill.Size=UDim2.new((default-min)/(max-min),0,1,0)
+    fill.BackgroundColor3=Color3.fromRGB(0,170,255)
+    Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+    local function upd(inp)
+        local p=math.clamp((inp.Position.X-barf.AbsolutePosition.X)/barf.AbsoluteSize.X,0,1)
+        fill.Size=UDim2.new(p,0,1,0)
+        local val=math.floor(min+(max-min)*p)
+        lbl.Text=text..": "..val cb(val)
+    end
+    barf.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then
+            upd(inp)
+            local c=UserInputService.InputChanged:Connect(function(i)
+                if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then upd(i) end
+            end)
+            UserInputService.InputEnded:Connect(function() c:Disconnect() end)
+        end
+    end)
+end
+
+local function B(parent,text,cb)
+    local Btn=Instance.new("TextButton",parent)
+    Btn.Size=UDim2.new(1,-20,0,34) Btn.BackgroundColor3=Color3.fromRGB(30,30,30)
+    Btn.Text=text Btn.TextColor3=Color3.fromRGB(220,220,220)
+    Btn.Font=Enum.Font.GothamMedium Btn.TextSize=13
+    Instance.new("UICorner",Btn).CornerRadius=UDim.new(0,8)
+    Btn.MouseEnter:Connect(function() TweenService:Create(Btn,TweenInfo.new(0.2),{BackgroundColor3=Color3.fromRGB(45,45,45)}):Play() end)
+    Btn.MouseLeave:Connect(function() TweenService:Create(Btn,TweenInfo.new(0.2),{BackgroundColor3=Color3.fromRGB(30,30,30)}):Play() end)
+    Btn.MouseButton1Click:Connect(function()
+        local c=TweenService:Create(Btn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(60,60,60)})
+        c:Play() c.Completed:Wait()
+        TweenService:Create(Btn,TweenInfo.new(0.2),{BackgroundColor3=Color3.fromRGB(30,30,30)}):Play()
+        cb()
+    end)
+end
+
+local InjectPage   = CreateTab("Inject")
+local PlayerPage   = CreateTab("Player")
+local BallPage     = CreateTab("Ball")
+local WebhookPage  = CreateTab("Webhook")
+local PerfPage     = CreateTab("Perf")
+local SecurityPage = CreateTab("Security")
+local StatsPage    = CreateTab("Stats")
+
+B(InjectPage,"Inject Script",function()
+    local n=scanACRemotes()
+    Notify("Injected! New AC remotes: "..n)
+    sendSessionWebhook("START")
+end)
+
+T(PlayerPage,"Enable Reach (All Balls)",false,function(s) nuluxSettings.reachOn=s Notify(s and "Reach ON" or "Reach OFF") end)
+T(PlayerPage,"Show Reach Visualizer (Ball-Anchored)",false,function(s) nuluxSettings.reachVis=s end)
+T(PlayerPage,"Full Volume Reach",true,function(s) nuluxSettings.reachFullVolume=s end)
+T(PlayerPage,"Contact Other Players",true,function(s) nuluxSettings.reachPlayers=s end)
+T(PlayerPage,"Ignore Velocity Check (always log)",false,function(s) nuluxSettings.ignoreVelocityCheck=s end)
+S(PlayerPage,"Reach X",1,250,18,function(v) nuluxSettings.reachX=v end)
+S(PlayerPage,"Reach Y",1,250,18,function(v) nuluxSettings.reachY=v end)
+S(PlayerPage,"Reach Z",1,250,18,function(v) nuluxSettings.reachZ=v end)
+S(PlayerPage,"Transparency",0,100,50,function(v) nuluxSettings.reachTransparency=v nuluxSettings.gkReachTransparency=v end)
+T(PlayerPage,"Enable Feet Reach",false,function(s) nuluxSettings.feetReachOn=s end)
+T(PlayerPage,"Feet Visualizer",false,function(s) nuluxSettings.feetVis=s end)
+S(PlayerPage,"Feet X",1,120,22,function(v) nuluxSettings.feetX=v end)
+S(PlayerPage,"Feet Y",1,120,13,function(v) nuluxSettings.feetY=v end)
+S(PlayerPage,"Feet Z",1,120,22,function(v) nuluxSettings.feetZ=v end)
+
+T(BallPage,"Ball Predictor",false,function(s) nuluxSettings.ballPredOn=s end)
+T(BallPage,"GK Reach",false,function(s) nuluxSettings.gkReachOn=s end)
+T(BallPage,"GK Visualizer",false,function(s) nuluxSettings.gkReachVis=s end)
+S(BallPage,"GK X",1,80,5,function(v) nuluxSettings.gkReachX=v end)
+S(BallPage,"GK Y",1,80,5,function(v) nuluxSettings.gkReachY=v end)
+S(BallPage,"GK Z",1,80,5,function(v) nuluxSettings.gkReachZ=v end)
+
+T(WebhookPage,"Enable Webhooks",true,function(s) webhookEnabled=s end)
+T(WebhookPage,"Touch-Only Mode",true,function(s) nuluxSettings.touchOnlyWebhook=s end)
+T(WebhookPage,"Flag Unnatural Touches",true,function(s) nuluxSettings.flagUnnatural=s end)
+S(WebhookPage,"Ball CD (s)",2,60,4,function(v) CHANNELS.BALL.cd=v end)
+S(WebhookPage,"AC CD (s)",2,30,5,function(v) CHANNELS.AC.cd=v end)
+S(WebhookPage,"Flag CD (s)",2,30,6,function(v) CHANNELS.FLAG.cd=v end)
+S(WebhookPage,"Min Velocity Δ",1,20,2,function(v) nuluxSettings.touchVelocityMin=v end)
+S(WebhookPage,"Heartbeat (s)",60,900,300,function(v) nuluxSettings.heartbeatSeconds=v end)
+B(WebhookPage,"Test Ball",function()
+    local ball=getAllBalls()[1]
+    local dist,pos,vel=0,Vector3.zero,Vector3.zero
+    if ball then
+        pos=ball.Position vel=ball.AssemblyLinearVelocity or Vector3.zero
+        local hrp=player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then dist=(hrp.Position-ball.Position).Magnitude end
+    end
+    sendBallWebhook(ball and ball.Name or "TEST",dist,"TESTBALLID",true,{velocity=vel,position=pos,kind="manual-test"})
+end)
+B(WebhookPage,"Test Flag",function() CHANNELS.FLAG.last=0 sendFlagWebhook("TEST_BALL",999,{velocity=Vector3.new(200,0,0),position=Vector3.zero,reason="manual flag test"}) end)
+B(WebhookPage,"Test Ban Card",function()
+    sendBanWebhook("BAN","Manual test ban reason","Manual Trigger")
+end)
+B(WebhookPage,"Test Kick Card",function()
+    sendBanWebhook("KICK","Manual test kick reason","Manual Trigger")
+end)
+B(WebhookPage,"Test Error",function() CHANNELS.ERROR.last=0 reportError("MANUAL_TEST","Test error from UI") end)
+B(WebhookPage,"Test Session",function() sendSessionWebhook("MANUAL_TEST") end)
+B(WebhookPage,"Test Remote",function() sendRemoteWebhook({"ManualTestRemote"},true) end)
+
+S(PerfPage,"Contact Throttle (ms)",10,200,30,function(v) nuluxSettings.contactThrottleMs=v end)
+S(PerfPage,"Viz Update Rate (Hz)",5,60,30,function(v) nuluxSettings.vizUpdateHz=v VIZ_INTERVAL=1/v end)
+T(PerfPage,"Viz Quality: Full",true,function(s) nuluxSettings.vizQuality=s and 1 or 0 end)
+B(PerfPage,"Low-End Preset",function()
+    nuluxSettings.contactThrottleMs=80 nuluxSettings.vizUpdateHz=15
+    nuluxSettings.vizQuality=0
+    VIZ_INTERVAL=1/15 Notify("Low-end applied")
+end)
+B(PerfPage,"High-End Preset",function()
+    nuluxSettings.contactThrottleMs=25 nuluxSettings.vizUpdateHz=60
+    nuluxSettings.vizQuality=1
+    VIZ_INTERVAL=1/60 Notify("High-end applied")
+end)
+
+B(SecurityPage,"Scan AC Remotes",function() local n=scanACRemotes() Notify(n.." new") end)
+B(SecurityPage,"Clear Logs",function() acLog={} touchLog={} banLog={} errorLog={} remoteLog={} Notify("Logs cleared") end)
+T(SecurityPage,"Notifications",true,function(s) getgenv().NotifsEnabled=s end)
+
+local statsLabel = Instance.new("TextLabel", StatsPage)
+statsLabel.Size = UDim2.new(1,-20,0,240)
+statsLabel.BackgroundColor3 = Color3.fromRGB(25,25,25)
+statsLabel.TextColor3 = Color3.fromRGB(220,220,220)
+statsLabel.Font = Enum.Font.Code
+statsLabel.TextSize = 13
+statsLabel.TextXAlignment = Enum.TextXAlignment.Left
+statsLabel.TextYAlignment = Enum.TextYAlignment.Top
+statsLabel.TextWrapped = true
+statsLabel.Text = "Loading..."
+Instance.new("UICorner",statsLabel).CornerRadius=UDim.new(0,8)
+
+task.spawn(function()
+    while true do
+        local uniq=0; for _ in pairs(SESSION.uniqueBalls) do uniq=uniq+1 end
+        local avg = SESSION.touches > 0 and (SESSION.totalDistance/SESSION.touches) or 0
+        local vizCount=0; for _ in pairs(vizParts) do vizCount=vizCount+1 end
+        statsLabel.Text = string.format(
+            "  SESSION STATS\n  ─────────────────────\n"..
+            "  Touches        : %d\n  Unique Balls   : %d\n"..
+            "  Player Contacts: %d\n  Avg Distance   : %.2f\n"..
+            "  Longest Reach  : %.2f\n  Flagged Touches: %d\n"..
+            "  Bans Blocked   : %d\n  Kicks Blocked  : %d\n"..
+            "  Errors         : %d\n  Streak / Max   : %d / %d\n"..
+            "  Duration       : %s\n  FPS / Ping     : %d / %d\n"..
+            "  Queue Length   : %d\n  Viz Parts      : %d",
+            SESSION.touches, uniq, SESSION.contacts, avg, SESSION.longestReach,
+            SESSION.flaggedTouches, SESSION.bans, SESSION.kicks, SESSION.errors,
+            SESSION.streak, SESSION.maxStreak, getSessionDuration(),
+            currentFPS, getPing(), #sendQueue, vizCount
+        )
+        task.wait(0.5)
+    end
+end)
+
+B(StatsPage,"Reset Session Stats",function()
+    SESSION.touches=0 SESSION.uniqueBalls={} SESSION.totalDistance=0
+    SESSION.longestReach=0 SESSION.flaggedTouches=0
+    SESSION.streak=0 SESSION.maxStreak=0 SESSION.startTime=tick()
+    SESSION.bans=0 SESSION.kicks=0 SESSION.errors=0 SESSION.contacts=0
+    Notify("Stats reset")
+end)
+
+CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible=false Reopen.Visible=true end)
+Reopen.MouseButton1Click:Connect(function() MainFrame.Visible=true Reopen.Visible=false end)
+pcall(function() player.CharacterAdded:Connect(function() sendSessionWebhook("RESPAWN") end) end)
+
+-- ================================================================
+-- GETGC BYPASS
+-- ================================================================
+for _,v in pairs(getgc(true)) do
+    if type(v)=="table" and rawget(v,"gkCheck") then
+        local rf=v.react or v._react or v.checkReact or v.React
+        if rf then
+            local consts=debug.getconstants(rf)
+            for i,c in pairs(consts) do
+                if c=="ignoreReactDecline" or c=="specialTool" or c=="declineReact" or c=="blockReact" or c=="reactDecline" then
+                    debug.setconstant(rf,i,"ball")
+                elseif c=="overlapCheck" or c=="reachCheck" or c=="distanceCheck" or c=="proximityCheck" then
+                    rawset(v,"check",function() return true end)
+                    rawset(v,"overlapCheck",function() return true end)
+                    rawset(v,"_check",function() return true end)
+                    debug.setconstant(rf,i,"check")
+                end
+            end
+        end
+    end
+end
+for _,v in pairs(getgc(true)) do
+    if type(v)=="table" and (rawget(v,"GoldEye") or tostring(v):lower():find("goldeye")) then
+        for _,j in pairs(v) do
+            if type(j)=="function" then hookfunction(j,function(...) return true end)
+            elseif type(j)=="table" then
+                for _,f in pairs(j) do
+                    if type(f)=="function" then hookfunction(f,function(...) return true end) end
+                end
+            end
+        end
+        v=setmetatable({},{__index=function() return true end,__newindex=function() end})
+    end
+end
+
+pcall(function()
+    Players.LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end)
+
+-- ================================================================
+-- INIT
+-- ================================================================
+scanACRemotes(true)
+Pages["Inject"].Page.Visible=true
+Pages["Inject"].Btn.TextColor3=Color3.fromRGB(255,255,255)
+Pages["Inject"].Ind.Size=UDim2.new(0,4,0,20)
+sendSessionWebhook("START")
+Notify("Nulux loaded — ban/kick cards active!")
+print("[Nulux] LOADED — ban/kick blockquote format wired")
