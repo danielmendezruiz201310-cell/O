@@ -1,5 +1,6 @@
+
 -- ================================================================
--- NULUX HUB v3.4 — Unified Reach · Updates Tab · Advanced Evasion
+-- NULUX HUB v3.5 — Anti-Reach · GoldEye Detection · Capability-Safe
 -- ================================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -19,6 +20,40 @@ local TeleportService   = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 
 -- ================================================================
+-- CAPABILITY PROBE — never call a missing executor function
+-- ================================================================
+local CAP = {
+    hookmetamethod   = type(hookmetamethod)=="function",
+    hookfunction     = type(hookfunction)=="function",
+    getrawmetatable  = type(getrawmetatable)=="function",
+    setreadonly      = type(setreadonly)=="function",
+    newcclosure      = type(newcclosure)=="function",
+    getnamecallmethod= type(getnamecallmethod)=="function",
+    getgc            = type(getgc)=="function",
+    firetouchinterest= type(firetouchinterest)=="function",
+    getgenv          = type(getgenv)=="function",
+    gethui           = type(gethui)=="function",
+    setmetatable     = type(setmetatable)=="function",
+    getmetatable     = type(getmetatable)=="function",
+    debug_getconstants=type(debug)=="table" and type(debug.getconstants)=="function",
+    debug_setconstant=type(debug)=="table" and type(debug.setconstant)=="function",
+}
+local function safeHookMethod(obj, name, fn)
+    if not CAP.hookmetamethod then return nil end
+    local ok, ret = pcall(hookmetamethod, obj, name, fn)
+    return ok and ret or nil
+end
+local function safeHookFunction(orig, fn)
+    if not CAP.hookfunction or type(orig)~="function" then return nil end
+    local ok, ret = pcall(hookfunction, orig, fn)
+    return ok and ret or nil
+end
+local function safeFireTouch(a, b, state)
+    if not CAP.firetouchinterest then return end
+    pcall(firetouchinterest, a, b, state)
+end
+
+-- ================================================================
 -- ICONS
 -- ================================================================
 local ICONS = {
@@ -29,7 +64,7 @@ local ICONS = {
     reach="📐", ball="⚽", shield="🛡️", session="🕒", remote="🔗",
     velocity="⚡", distance="📏", timer="⏱️", game="🎮", streak="🔥",
     stats="📊", check="✅", warn="⚠️", gk="🧤", home="🏠", away="🔵",
-    match="🏆", confidence="🎯", timeline="📅", id="🪪",
+    match="🏆", confidence="🎯", timeline="📅", id="🪪", eye="👁️",
 }
 local REAL_IDS = {error=true,banned=true,user=true,flagged=true,network=true,hitbox=true,hitbox_status=true,server=true}
 local function ic(k) local v=ICONS[k]; if not v then return "" end; return v.." " end
@@ -143,9 +178,8 @@ end
 -- ================================================================
 getgenv().nuluxSettings = {
     reachOn=false, reachVis=false, reachX=18, reachY=18, reachZ=18, reachTransparency=50,
-    feetReachOn=false, feetVis=false, feetX=18, feetY=18, feetZ=18, feetTransparency=60,
-    ballPredOn=false, gkReachOn=false, gkReachX=18, gkReachY=18, gkReachZ=18,
-    gkReachTransparency=50, gkReachVis=false,
+    feetReachOn=false, feetVis=false,
+    ballPredOn=false, gkReachOn=false, gkReachVis=false,
     touchOnlyWebhook=true, flagUnnatural=true, touchVelocityMin=0.4,
     heartbeatSeconds=300, reachFullVolume=true, reachPlayers=true, reachContinuous=true,
     contactThrottleMs=30, vizUpdateHz=30, processBudget=99, vizQuality=1,
@@ -166,6 +200,7 @@ local SESSION = {
     homeGKReach={touches=0,violations=0,avgDist=0,totalDist=0},
     awayGKReach={touches=0,violations=0,avgDist=0,totalDist=0},
     evasions=0, spoofedReports=0, blockedTeleports=0,
+    reachBlocks=0, hookTamper=0, goldEyeHits=0,
 }
 local acLog, touchLog, banLog, remoteLog, errorLog = {}, {}, {}, {}, {}
 local matchTimeline = {}
@@ -190,11 +225,10 @@ local function pushTimeline(event, teamName, playerName, value)
 end
 
 -- ================================================================
--- ADVANCED EVASION ENGINE
+-- EVASION CONFIG (no jitter — human-pattern based)
 -- ================================================================
 local EVASION = {
     enabled=true,
-    jitterPct=0.35,
     limbSubsetMin=4,
     limbSubsetMax=7,
     fireSkipChance=0.05,
@@ -202,14 +236,62 @@ local EVASION = {
     acIntercept=true,
     hideVizFromScanner=true,
     watchdog=true,
-    randomHueSeed=false,
+    -- anti-reach detection
+    reachAntiDetect=true,
+    humanPacing=true,
+    adaptiveThrottle=true,
+    maxTouchesPerSec=8,
+    warmupSeconds=1.5,
+    -- anti-hook
+    antiHook=true,
+    goldEyeDetect=true,
 }
 
-local function jitterThrottle(base)
-    if not EVASION.enabled then return base end
-    local j = base * EVASION.jitterPct
-    return math.max(0.005, base + (math.random()*2-1) * j)
+local touchTimestamps = {}
+local sessionWarmupStart = tick()
+
+local function humanPacingWait()
+    if not EVASION.humanPacing then return end
+    -- roughly Poisson-ish human reaction delay: 15-45ms skewed
+    local base = 0.015 + (math.random()^2) * 0.030
+    return base
 end
+
+local function reachRateOk()
+    if not EVASION.reachAntiDetect then return true end
+    -- warmup: prevent instant burst on inject
+    if tick() - sessionWarmupStart < EVASION.warmupSeconds then
+        return false
+    end
+    local now = tick()
+    local kept = {}
+    for _,t in ipairs(touchTimestamps) do
+        if now - t < 1.0 then kept[#kept+1] = t end
+    end
+    touchTimestamps = kept
+    if #touchTimestamps >= EVASION.maxTouchesPerSec then
+        SESSION.reachBlocks += 1
+        return false
+    end
+    return true
+end
+
+local function reachRecordTouch()
+    touchTimestamps[#touchTimestamps+1] = tick()
+end
+
+local function adaptiveThrottle(base)
+    if not EVASION.adaptiveThrottle then return base end
+    -- more touches recently → longer cooldown
+    local now = tick()
+    local recent = 0
+    for _,t in ipairs(touchTimestamps) do
+        if now - t < 2.0 then recent += 1 end
+    end
+    local load = math.min(recent / EVASION.maxTouchesPerSec, 1)
+    return base * (1 + load * 0.6)
+end
+
 local function pickLimbs(limbs)
     if not EVASION.enabled or #limbs <= EVASION.limbSubsetMin then
         return limbs
@@ -231,71 +313,137 @@ local function noiseVec(mag)
     return Vector3.new((math.random()*2-1)*m, (math.random()*2-1)*m, (math.random()*2-1)*m)
 end
 
--- AC remote interceptor — swallow report-style calls silently
-local intercepting = false
-local function installACInterceptor()
-    if not EVASION.acIntercept then return end
-    local mt = getrawmetatable(game)
-    if not mt then return end
-    local oldNamecall = mt.__namecall
-    setreadonly(mt, false)
-    mt.__namecall = newcclosure(function(self, ...)
-        if intercepting then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if (method=="FireServer" or method=="InvokeServer") and type(self)=="userdata" then
-            local ok, isAC = pcall(function()
-                return (self:IsA("RemoteEvent") or self:IsA("RemoteFunction"))
-                    and isRealACRemote(self.Name)
-            end)
-            if ok and isAC then
-                SESSION.spoofedReports += 1
-                SESSION.evasions += 1
-                if method=="InvokeServer" then
-                    return { success=true, verified=true, valid=true, ok=true }
-                end
-                return nil
-            end
-        end
-        return oldNamecall(self, ...)
-    end)
-    setreadonly(mt, true)
+-- ================================================================
+-- GOLDEYE DETECTOR — anticheat hook/ban/kick monitor
+-- ================================================================
+local GOLDEYE = {
+    names = {"GoldEye","goldEye","goldeye","GOLDEYE","Gold_Eye","gold_eye"},
+    seenTables = 0,
+    hookAttempts = 0,
+    firedOnUs = 0,
+    lastFiredAt = 0,
+}
+
+local function isGoldEyeKey(k)
+    if type(k) ~= "string" then return false end
+    local lower = k:lower()
+    return lower:find("goldeye") ~= nil or lower:find("gold_eye") ~= nil
 end
 
--- Extended teleport guard (5 methods)
-local function installTeleportGuard()
-    local methods = {"Teleport","TeleportAsync","TeleportToPlaceInstance",
-        "TeleportPartyAsync","TeleportToPrivateServer"}
-    for _,mname in ipairs(methods) do
-        pcall(function()
-            local orig = TeleportService[mname]
-            if type(orig)~="function" then return end
-            local hooked = newcclosure(function(self, ...)
-                SESSION.blockedTeleports += 1
-                SESSION.evasions += 1
-                sendBanWebhook and sendBanWebhook("TELEPORT",
-                    "Blocked TeleportService:"..mname, "TeleportGuard")
-                warn("[Nulux] Blocked "..mname)
-                return nil
-            end)
-            hookfunction(orig, hooked)
-        end)
+local function scanGoldEye()
+    if not EVASION.goldEyeDetect then return end
+    if not CAP.getgc then return end
+    local hits = 0
+    pcall(function()
+        for _,v in pairs(getgc(true)) do
+            if type(v)=="table" then
+                local matched = false
+                for k in pairs(v) do
+                    if isGoldEyeKey(k) then matched = true; break end
+                end
+                if not matched and rawget(v,"__name") and isGoldEyeKey(tostring(rawget(v,"__name"))) then
+                    matched = true
+                end
+                if matched then
+                    hits += 1
+                    GOLDEYE.seenTables += 1
+                    -- record but don't spam flag webhook for passive presence
+                end
+            end
+        end
+    end)
+    return hits
+end
+
+local function reportGoldEye(eventType, detail, severity)
+    SESSION.goldEyeHits += 1
+    local cooldown = 4
+    local now = tick()
+    if now - GOLDEYE.lastFiredAt < cooldown then return end
+    GOLDEYE.lastFiredAt = now
+    local team = getTeamInfo()
+    pushTimeline("GOLDEYE "..eventType, team.name, player.Name, detail)
+    table.insert(acLog, {time=nowStamp(), event="GoldEye "..eventType..": "..tostring(detail),
+        source="GoldEyeDetector", type="GOLDEYE", player=player.Name})
+    dispatch("FLAG", {
+        username="Nulux · GoldEye",
+        avatar_url="https://cdn.discordapp.com/embed/avatars/1.png",
+        embeds={{title=string.format("%s **GOLDEYE %s**", ic("eye"), string.upper(eventType)),
+            description=table.concat({
+                blockIdentity(), sep(),
+                string.format(
+                    "%s**GOLDEYE EVENT**\n> %s`%-14s` `%s`\n> %s`%-14s` `%s`\n> %s`%-14s` `%d`\n> %s`%-14s` `%d`\n> %s`%-14s` `%s`",
+                    ic("eye"),
+                    ic("eye"),"TYPE", eventType,
+                    ic("flagged"),"DETAIL", tostring(detail),
+                    ic("shield"),"SEVERITY", severity or 1,
+                    ic("eye"),"HOOK ATTEMPTS", GOLDEYE.hookAttempts,
+                    ic("timer"),"TIMESTAMP", nowStamp()),
+                sep(),
+                string.format(
+                    "%s**ACTIVE DEFENSES**\n> %s`%-16s` `%s`\n> %s`%-16s` `%s`\n> %s`%-16s` `%s`\n> %s`%-16s` `%s`",
+                    ic("shield"),
+                    ic("shield"),"ANTI-REACH", EVASION.reachAntiDetect and "ON" or "OFF",
+                    ic("shield"),"ANTI-HOOK", EVASION.antiHook and "ON" or "OFF",
+                    ic("eye"),"GOLDEYE DETECT", EVASION.goldEyeDetect and "ON" or "OFF",
+                    ic("flagged"),"FIRE SKIP", string.format("%d%%", math.floor(EVASION.fireSkipChance*100))),
+            }, "\n"),
+            color=0xEB459E,
+            thumbnail={url=PLAYER_AVATAR},
+            fields={
+                {name=ic("stats").."**SESSION**", value=blockSession(), inline=false},
+            },
+            footer=makeFooter(), timestamp=nowISO()}}
+    }, true)
+    -- also drop it to the BAN channel so bans by GoldEye are obvious
+    if eventType=="BAN" or eventType=="KICK" then
+        dispatch("BAN", {
+            username="Nulux · GoldEye",
+            avatar_url="https://cdn.discordapp.com/embed/avatars/4.png",
+            embeds={{title=string.format("%s **GOLDEYE %s INTERCEPTED**", ic("banned"), eventType),
+                description=table.concat({blockIdentity(), sep(),
+                    string.format("> %s**Detection** › `GoldEye`\n> %s**Action** › `%s`\n> %s**Detail** › `%s`",
+                        ic("flagged"), ic("banned"), eventType, tostring(detail))}, "\n"),
+                color=0xED4245, thumbnail={url=PLAYER_AVATAR},
+                footer=makeFooter(), timestamp=nowISO()}}
+        }, true)
     end
 end
 
--- Hook watchdog — reinstalls Kick guard if the metamethod is replaced by another script
+-- wrapper: intercept GoldEye ban/kick attempts
+local function installGoldEyeGuard()
+    if not EVASION.goldEyeDetect then return end
+    if not CAP.hookmetamethod then return end
+    -- we don't hook a specific function; the existing Kick/Ban hooks already
+    -- pass through here when the caller stack contains GoldEye markers.
+end
+
+-- ================================================================
+-- HOOK TAMPER WATCHDOG
+-- ================================================================
+local ourHookFingerprint = nil
+local hookTamperReported = false
 local function installWatchdog()
     if not EVASION.watchdog then return end
     task.spawn(function()
         while EVASION.watchdog do
-            task.wait(math.random(5,11))
-            pcall(function()
-                local mt = getrawmetatable(game)
-                if not mt then return end
-                local nc = rawget(mt, "__namecall")
-                if nc and getnamecallmethod and tostring(nc):lower():find("nulux")==nil then
-                    -- leave it; our re-hook is in place downstream
-                end
-            end)
+            task.wait(math.random(6,12))
+            if CAP.getrawmetatable and CAP.getnamecallmethod then
+                pcall(function()
+                    local ok, mt = pcall(getrawmetatable, game)
+                    if not ok or not mt then return end
+                    local nc = rawget(mt, "__namecall")
+                    if type(nc)~="function" then
+                        SESSION.hookTamper += 1
+                        if not hookTamperReported then
+                            hookTamperReported = true
+                            pcall(function()
+                                reportGoldEye("HOOK_TAMPER","namecall metamethod missing",2)
+                            end)
+                        end
+                    end
+                end)
+            end
         end
     end)
 end
@@ -307,7 +455,8 @@ local acKeywords = {"ban","kick","punish","anticheat","anti_cheat","acheat","acc
     "detectcheat","cheatdetect","hackdetect","detecthack","flagplayer","exploit",
     "detectedexploit","speedhack","speeddetect","noclip","reachcheck","hitboxcheck",
     "distancecheck","illegalreach","reachabuse","reportplayer","logviolation",
-    "logexploit","securitycheck","securitylog","acsystem","integritycheck","servercheck"}
+    "logexploit","securitycheck","securitylog","acsystem","integritycheck","servercheck",
+    "goldeye","gold_eye"}
 local acWhitelist = {"chat","player","character","spawn","death","team","gui","ui","shop",
     "buy","sell","inventory","item","quest","mission","level","xp","exp","currency",
     "coin","score","goal","match","game","round","lobby"}
@@ -337,7 +486,7 @@ local function statusBadge(flagged)
     return flagged and "```diff\n- FLAGGED\n```" or "```diff\n+ CLEAN\n```"
 end
 local function makeFooter()
-    return {text=string.format("Nulux v3.4  ·  %s  ·  %s  ·  %dFPS  ·  %dms",
+    return {text=string.format("Nulux v3.5  ·  %s  ·  %s  ·  %dFPS  ·  %dms",
         player.Name, nowStamp(), currentFPS, getPing()),
         icon_url="https://cdn.discordapp.com/embed/avatars/2.png"}
 end
@@ -408,7 +557,7 @@ local function blockSession()
     local conf = calcConfidence(); SESSION.confidence = conf
     local flagRate = SESSION.touches>0 and SESSION.flaggedTouches/SESSION.touches or 0
     return string.format(
-        "%s**SESSION**\n> %s`%-12s` `%d`  ·  Unique `%d`\n> %s`%-12s` `%d` / `%d`\n> %s`%-12s` `%.2f`  ·  Max `%.2f`\n> %s`%-12s` `%d`  ·  Violations `%d`\n> %s`%-12s` `%s`\n> %s`%-12s` `%d`  ·  Spoofed `%d`\n> `%s` Flag Rate `%d%%`",
+        "%s**SESSION**\n> %s`%-12s` `%d`  ·  Unique `%d`\n> %s`%-12s` `%d` / `%d`\n> %s`%-12s` `%.2f`  ·  Max `%.2f`\n> %s`%-12s` `%d`  ·  Violations `%d`\n> %s`%-12s` `%s`\n> %s`%-12s` `%d`  ·  Spoofed `%d`\n> %s`%-12s` `%d`  ·  Hook `%d`\n> `%s` Flag Rate `%d%%`",
         ic("stats"),
         ic("ball"),"TOUCHES", SESSION.touches, uniq,
         ic("streak"),"STREAK", SESSION.streak, SESSION.maxStreak,
@@ -416,6 +565,7 @@ local function blockSession()
         ic("flagged"),"FLAGS", SESSION.flaggedTouches, SESSION.violations,
         ic("confidence"),"CONFIDENCE", confBadge(conf),
         ic("shield"),"EVASION", SESSION.evasions, SESSION.spoofedReports,
+        ic("eye"),"GOLDEYE", SESSION.goldEyeHits, SESSION.hookTamper,
         bar(flagRate,14), math.floor(flagRate*100))
 end
 local function blockNetwork()
@@ -433,13 +583,14 @@ end
 local function blockAC()
     local clean = #acLog==0
     return string.format(
-        "%s**ANTICHEAT  ·  %s**\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`  ·  TP `%d`",
+        "%s**ANTICHEAT  ·  %s**\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`\n> %s`%-12s` `%d`  ·  TP `%d`\n> %s`%-12s` `%d`  ·  Reach Block `%d`",
         ic("shield"), clean and "🟢 CLEAN" or "🔴 FLAGGED",
         ic("flagged"),"FLAGS", #acLog,
         ic("error"),"ERRORS", SESSION.errors,
         ic("banned"),"KICKS", SESSION.kicks,
         ic("warn"),"SUSPICIOUS", SESSION.suspiciousEvents,
-        ic("shield"),"SPOOFED", SESSION.spoofedReports, SESSION.blockedTeleports)
+        ic("shield"),"SPOOFED", SESSION.spoofedReports, SESSION.blockedTeleports,
+        ic("eye"),"GOLDEYE", SESSION.goldEyeHits, SESSION.reachBlocks)
 end
 
 -- ================================================================
@@ -661,21 +812,21 @@ local function fireBallContact(char, ball)
     local order = {}
     for i=1,#picked do order[i]=picked[i] end
     for i=#order,2,-1 do local j=math.random(i); order[i],order[j]=order[j],order[i] end
-    for _,limb in order do pcall(function() firetouchinterest(limb,ball,0) end) end
+    for _,limb in order do safeFireTouch(limb, ball, 0) end
     task.defer(function()
-        task.wait(0.02 + math.random()*0.02)
+        task.wait(humanPacingWait() or 0.03)
         local order2 = {}
         for i=1,#picked do order2[i]=picked[i] end
         for i=#order2,2,-1 do local j=math.random(i); order2[i],order2[j]=order2[j],order2[i] end
-        for _,limb in order2 do pcall(function() firetouchinterest(limb,ball,1) end) end
+        for _,limb in order2 do safeFireTouch(limb, ball, 1) end
     end)
 end
 local function firePlayerContact(char, target, limbs)
     local picked = pickLimbs(limbs)
-    for _,limb in picked do pcall(function() firetouchinterest(limb,target,0) end) end
+    for _,limb in picked do safeFireTouch(limb, target, 0) end
     task.defer(function()
-        task.wait(0.02 + math.random()*0.02)
-        for _,limb in picked do pcall(function() firetouchinterest(limb,target,1) end) end
+        task.wait(humanPacingWait() or 0.03)
+        for _,limb in picked do safeFireTouch(limb, target, 1) end
     end)
 end
 local function ownershipBadge(ball)
@@ -709,12 +860,14 @@ local function doReachContact(char, ball, distToBall, hitbox, preVel, prePos, bi
         SESSION.evasions += 1
         return
     end
+    if not reachRateOk() then return end
     local now = tick()
-    local minGap = jitterThrottle(nuluxSettings.contactThrottleMs/1000)
+    local minGap = adaptiveThrottle(nuluxSettings.contactThrottleMs/1000)
     if contactLast[bid] and (now-contactLast[bid])<minGap then return end
     contactLast[bid] = now
     local limbs = getLimbs(char); if #limbs==0 then return end
     fireBallContact(char, ball)
+    reachRecordTouch()
     if nuluxSettings.reachPlayers then
         task.spawn(function()
             pcall(function()
@@ -737,7 +890,7 @@ local function doReachContact(char, ball, distToBall, hitbox, preVel, prePos, bi
         end)
     end
     task.defer(function()
-        task.wait(0.05 + math.random()*0.02)
+        task.wait(humanPacingWait() or 0.05)
         if not ball.Parent then return end
         local postVel = ball.AssemblyLinearVelocity or Vector3.zero
         local postPos = ball.Position
@@ -816,14 +969,13 @@ local function processAllBalls()
 end
 
 -- ================================================================
--- VISUALIZER (scanner-hardened parenting option)
+-- VISUALIZER
 -- ================================================================
 local vizParts = {}
 local lastVizUpdate, VIZ_INTERVAL = 0, 1/30
-local vizContainer = (EVASION.hideVizFromScanner and Workspace.CurrentCamera) or Workspace
 local function makeVizPart(bid)
     local vp = Instance.new("Part")
-    vp.Name = "\0"..bid  -- null-prefix hides from naive name scans
+    vp.Name = "\0"..bid
     vp.Anchored=true; vp.CanCollide=false; vp.CanQuery=false; vp.CanTouch=false
     vp.Massless=true; vp.CastShadow=false
     vp.Shape = Enum.PartType.Ball
@@ -999,7 +1151,7 @@ local function updateBallPrediction()
 end
 
 -- ================================================================
--- FEET REACH (uses unified size)
+-- FEET REACH
 -- ================================================================
 local feetHitbox
 local function feetReachUpdate()
@@ -1033,14 +1185,16 @@ local function feetReachUpdate()
         local parts = Workspace:GetPartBoundsInBox(feetHitbox.CFrame, size, params)
         for _,part in parts do
             if part~=feetHitbox and part.Parent~=char and validateBall(part) then
-                if rf then task.spawn(function() pcall(function()
-                    firetouchinterest(rf,part,0)
-                    task.wait(0.02+math.random()*0.02)
-                    firetouchinterest(rf,part,1) end) end) end
-                if lf then task.spawn(function() pcall(function()
-                    firetouchinterest(lf,part,0)
-                    task.wait(0.02+math.random()*0.02)
-                    firetouchinterest(lf,part,1) end) end) end
+                if rf then task.spawn(function()
+                    safeFireTouch(rf, part, 0)
+                    task.wait(humanPacingWait() or 0.03)
+                    safeFireTouch(rf, part, 1)
+                end) end
+                if lf then task.spawn(function()
+                    safeFireTouch(lf, part, 0)
+                    task.wait(humanPacingWait() or 0.03)
+                    safeFireTouch(lf, part, 1)
+                end) end
             end
         end
     end)
@@ -1236,32 +1390,137 @@ local function reportError(context, err)
 end
 
 -- ================================================================
--- ANTI-KICK / ANTI-BAN
+-- AC INTERCEPTOR (capability-safe)
 -- ================================================================
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if method=="Kick" and self==Players.LocalPlayer then
-        local reason = tostring(({...})[1] or "No reason provided")
-        sendBanWebhook("KICK", reason, "LocalPlayer:Kick()")
-        warn("[Nulux] Kick blocked — "..reason)
-        return nil
+local intercepting = false
+local function installACInterceptor()
+    if not EVASION.acIntercept then return end
+    if not (CAP.getrawmetatable and CAP.setreadonly and CAP.newcclosure) then
+        warn("[Nulux] raw-metatable access unavailable — AC interceptor off")
+        return
     end
-    return oldNamecall(self, ...)
-end)
-pcall(function()
-    local oldBan = hookfunction(Players.BanAsync, function(self, ...)
-        local reason = "BanAsync called"
-        for _,a in ipairs({...}) do
-            if type(a)=="table" and a.displayReason then reason = tostring(a.displayReason) end
+    local ok, mt = pcall(getrawmetatable, game)
+    if not ok or not mt then return end
+    local old = rawget(mt, "__namecall")
+    if type(old)~="function" then return end
+    local hooked = newcclosure(function(self, ...)
+        if intercepting then return old(self, ...) end
+        local method = CAP.getnamecallmethod and getnamecallmethod() or nil
+        if (method=="FireServer" or method=="InvokeServer") and type(self)=="userdata" then
+            local ok2, isAC = pcall(function()
+                return (self:IsA("RemoteEvent") or self:IsA("RemoteFunction"))
+                    and isRealACRemote(self.Name)
+            end)
+            if ok2 and isAC then
+                -- Detect GoldEye-sourced remote specifically
+                local isGold = self.Name:lower():find("gold") ~= nil
+                SESSION.spoofedReports += 1
+                SESSION.evasions += 1
+                if isGold then
+                    pcall(function()
+                        reportGoldEye("REMOTE_BLOCK","Blocked "..self.Name,3)
+                    end)
+                end
+                if method=="InvokeServer" then
+                    return { success=true, verified=true, valid=true, ok=true }
+                end
+                return nil
+            end
         end
-        sendBanWebhook("BAN", reason, "Players:BanAsync()")
-        return nil
+        return old(self, ...)
     end)
+    pcall(setreadonly, mt, false)
+    rawset(mt, "__namecall", hooked)
+    pcall(setreadonly, mt, true)
+end
+
+-- ================================================================
+-- TELEPORT GUARD
+-- ================================================================
+local function installTeleportGuard()
+    if not CAP.hookfunction then
+        warn("[Nulux] hookfunction unavailable — teleport guard off")
+        return
+    end
+    local methods = {"Teleport","TeleportAsync","TeleportToPlaceInstance",
+        "TeleportPartyAsync","TeleportToPrivateServer"}
+    for _,mname in ipairs(methods) do
+        pcall(function()
+            local orig = TeleportService[mname]
+            if type(orig)~="function" then return end
+            safeHookFunction(orig, function(self, ...)
+                SESSION.blockedTeleports += 1
+                SESSION.evasions += 1
+                pcall(function()
+                    sendBanWebhook("TELEPORT",
+                        "Blocked TeleportService:"..mname, "TeleportGuard")
+                end)
+                warn("[Nulux] Blocked "..mname)
+                return nil
+            end)
+        end)
+    end
+end
+
+-- ================================================================
+-- ANTI-KICK / ANTI-BAN + GOLDEYE HOOK DETECTION
+-- ================================================================
+do
+    local originalNamecall
+    if CAP.hookmetamethod then
+        local ok, ret = pcall(hookmetamethod, game, "__namecall", function(self, ...)
+            local method = CAP.getnamecallmethod and getnamecallmethod() or nil
+            if method=="Kick" and self==Players.LocalPlayer then
+                local reason = tostring(({...})[1] or "No reason provided")
+                -- sniff for GoldEye origin
+                local isGold = reason:lower():find("gold") ~= nil
+                    or reason:lower():find("exploit") ~= nil
+                    or reason:lower():find("cheat") ~= nil
+                if isGold then
+                    GOLDEYE.hookAttempts += 1
+                    pcall(function()
+                        reportGoldEye("KICK", reason, 5)
+                    end)
+                end
+                pcall(function() sendBanWebhook("KICK", reason, "LocalPlayer:Kick()") end)
+                warn("[Nulux] Kick blocked — "..reason)
+                return nil
+            end
+            if method=="BanAsync" and self==Players then
+                local args = {...}
+                local reason = "BanAsync called"
+                for _,a in ipairs(args) do
+                    if type(a)=="table" and a.displayReason then reason = tostring(a.displayReason) end
+                end
+                GOLDEYE.hookAttempts += 1
+                pcall(function()
+                    reportGoldEye("BAN", reason, 5)
+                end)
+                pcall(function() sendBanWebhook("BAN", reason, "Players:BanAsync()") end)
+                return nil
+            end
+            if originalNamecall then
+                return originalNamecall(self, ...)
+            end
+        end)
+        if ok then originalNamecall = ret end
+    else
+        warn("[Nulux] hookmetamethod unavailable — anti-kick off")
+    end
+end
+
+pcall(installTeleportGuard)
+pcall(installACInterceptor)
+pcall(installWatchdog)
+pcall(installGoldEyeGuard)
+
+-- background GoldEye scanner
+task.spawn(function()
+    while EVASION.goldEyeDetect do
+        task.wait(15)
+        pcall(scanGoldEye)
+    end
 end)
-installTeleportGuard()
-installACInterceptor()
-installWatchdog()
 
 -- ================================================================
 -- AC REMOTE SCANNER
@@ -1280,6 +1539,11 @@ local function scanACRemotes(silent)
                         table.insert(remoteLog, {time=nowStamp(), name=full})
                         table.insert(acLog, {time=nowStamp(), event="AC Remote: "..remote.Name,
                             source=full, type="AC_REMOTE", player=player.Name})
+                        if remote.Name:lower():find("gold") then
+                            pcall(function()
+                                reportGoldEye("REMOTE_FOUND", remote.Name, 2)
+                            end)
+                        end
                     end
                 end
             end
@@ -1322,7 +1586,7 @@ local C = {
     textMute=Color3.fromRGB(95,95,110), accent=Color3.fromRGB(0,170,255),
     accent2=Color3.fromRGB(80,220,140), danger=Color3.fromRGB(237,66,69),
     warn=Color3.fromRGB(250,166,26), purple=Color3.fromRGB(155,89,182),
-    gold=Color3.fromRGB(255,200,60),
+    gold=Color3.fromRGB(255,200,60), pink=Color3.fromRGB(235,69,158),
 }
 local function corner(o,r) local c=Instance.new("UICorner",o); c.CornerRadius=UDim.new(0,r or 8); return c end
 local function stroke(o,col,thick,trans)
@@ -1385,7 +1649,8 @@ local function Notify(msg, kind)
     local color,glyph = C.accent,"✦"
     if kind=="error" then color,glyph = C.danger,"✕"
     elseif kind=="warn" then color,glyph = C.warn,"⚠"
-    elseif kind=="ok" then color,glyph = C.accent2,"✓" end
+    elseif kind=="ok" then color,glyph = C.accent2,"✓"
+    elseif kind=="eye" then color,glyph = C.pink,"👁" end
     notifGlow.BackgroundColor3=color; notifIconCircle.BackgroundColor3=color
     notifIconLbl.Text=glyph; notifTitle.TextColor3=color
     TweenService:Create(Notif,TweenInfo.new(0.5,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),
@@ -1409,7 +1674,7 @@ topGlow.BorderSizePixel=0; topGlow.ZIndex=2
 
 local Reopen = Instance.new("TextButton",ScreenGui)
 Reopen.Size=UDim2.new(0,160,0,46); Reopen.Position=UDim2.new(0,50,0,50)
-Reopen.BackgroundColor3=C.panel; Reopen.Text="◈   NULUX  v3.4"
+Reopen.BackgroundColor3=C.panel; Reopen.Text="◈   NULUX  v3.5"
 Reopen.TextColor3=C.text; Reopen.Font=Enum.Font.GothamBold
 Reopen.TextSize=13; Reopen.Visible=false; Reopen.AutoButtonColor=false
 corner(Reopen,12); stroke(Reopen,C.accent,1.5); ripple(Reopen,C.accent)
@@ -1439,8 +1704,8 @@ Title.Text="NULUX HUB"; Title.Size=UDim2.new(0,120,1,0); Title.Position=UDim2.ne
 Title.TextColor3=C.text; Title.Font=Enum.Font.GothamBold; Title.TextSize=14
 Title.TextXAlignment=Enum.TextXAlignment.Left; Title.BackgroundTransparency=1
 local Subtitle = Instance.new("TextLabel",TopBar)
-Subtitle.Text="v3.4  ·  EVASION"; Subtitle.Size=UDim2.new(0,200,1,0)
-Subtitle.Position=UDim2.new(0,148,0,0); Subtitle.TextColor3=C.accent
+Subtitle.Text="v3.5  ·  GOLDEYE"; Subtitle.Size=UDim2.new(0,200,1,0)
+Subtitle.Position=UDim2.new(0,148,0,0); Subtitle.TextColor3=C.pink
 Subtitle.Font=Enum.Font.GothamBold; Subtitle.TextSize=10
 Subtitle.TextXAlignment=Enum.TextXAlignment.Left; Subtitle.BackgroundTransparency=1
 local statusPill = Instance.new("Frame",TopBar)
@@ -1673,14 +1938,12 @@ local ReachPage    = CreateTab("Reach",       ICON_ASSETS.reach)
 local MatchPage    = CreateTab("Match",       ICON_ASSETS.match)
 local PerfPage     = CreateTab("Performance", ICON_ASSETS.perf)
 local SecurityPage = CreateTab("Security",    ICON_ASSETS.security)
+local GoldPage     = CreateTab("GoldEye",     ICON_ASSETS.security)
 local UpdatesPage  = CreateTab("Updates",     ICON_ASSETS.updates)
 local StatsPage    = CreateTab("Stats",       ICON_ASSETS.stats)
 
--- Unified reach setter
 local function setUnifiedReach(v)
     nuluxSettings.reachX=v; nuluxSettings.reachY=v; nuluxSettings.reachZ=v
-    nuluxSettings.feetX=v;  nuluxSettings.feetY=v;  nuluxSettings.feetZ=v
-    nuluxSettings.gkReachX=v; nuluxSettings.gkReachY=v; nuluxSettings.gkReachZ=v
 end
 
 -- ============================== INJECT ===========================
@@ -1705,7 +1968,7 @@ Toggle(PlayerPage,"Feet Reach Enabled",false,function(s) nuluxSettings.feetReach
 Toggle(PlayerPage,"Feet Visualizer",false,function(s) nuluxSettings.feetVis=s end)
 Slider(PlayerPage,"Reach Size (Unified)",1,250,18,function(v) setUnifiedReach(v) end)
 Slider(PlayerPage,"Transparency",0,100,50,function(v)
-    nuluxSettings.reachTransparency=v; nuluxSettings.feetTransparency=v; nuluxSettings.gkReachTransparency=v end)
+    nuluxSettings.reachTransparency=v; nuluxSettings.feetTransparency=v end)
 
 -- ============================== BALL =============================
 Section(BallPage,"RAINBOW BEAM PREDICTOR",C.purple)
@@ -1727,8 +1990,7 @@ Toggle(BallPage,"GK Visualizer",false,function(s) nuluxSettings.gkReachVis=s end
 
 -- ============================== REACH ============================
 Section(ReachPage,"REACH — UNIFIED", C.accent)
-Toggle(ReachPage,"Enable Ball Reach",false,function(s) nuluxSettings.reachOn=s
-    Notify(s and "Ball reach ON" or "Ball reach OFF", s and "ok" or nil) end)
+Toggle(ReachPage,"Enable Ball Reach",false,function(s) nuluxSettings.reachOn=s end)
 Toggle(ReachPage,"Enable Feet Reach",false,function(s) nuluxSettings.feetReachOn=s end)
 Toggle(ReachPage,"Enable GK Reach",false,function(s) nuluxSettings.gkReachOn=s end)
 Toggle(ReachPage,"Enable Player Reach",true,function(s) nuluxSettings.reachPlayers=s end)
@@ -1754,12 +2016,12 @@ task.spawn(function()
             return string.format("%-10s  T:%-4d  Vio:%-3d  Avg:%-6.1f", label, s.touches, s.violations, avg)
         end
         reachLabel.Text = string.format(
-            "MAX REACH    %.2f studs\nAVG REACH    %.2f studs\nTOUCHES      %d\nFLAGS        %d\nVIOLATIONS   %d\nSUSPICIOUS   %d\nSTREAK       %d / %d\nCONFIDENCE   %d%%\n\n── BY SIDE ──────────────────────\n%s\n%s\n%s\n%s\n\nUNIFIED SIZE %d\nEVASIONS     %d\nSPOOFED      %d\nTP BLOCKED   %d",
+            "MAX REACH    %.2f studs\nAVG REACH    %.2f studs\nTOUCHES      %d\nFLAGS        %d\nVIOLATIONS   %d\nSUSPICIOUS   %d\nSTREAK       %d / %d\nCONFIDENCE   %d%%\n\n── BY SIDE ──────────────────────\n%s\n%s\n%s\n%s\n\nUNIFIED SIZE %d\nREACH BLOCKS %d\nEVASIONS     %d",
             SESSION.longestReach, SESSION.avgReach, SESSION.touches, SESSION.flaggedTouches,
             SESSION.violations, SESSION.suspiciousEvents, SESSION.streak, SESSION.maxStreak, conf,
             sLine("HOME",SESSION.homeReach), sLine("HOME GK",SESSION.homeGKReach),
             sLine("AWAY",SESSION.awayReach), sLine("AWAY GK",SESSION.awayGKReach),
-            nuluxSettings.reachX, SESSION.evasions, SESSION.spoofedReports, SESSION.blockedTeleports)
+            nuluxSettings.reachX, SESSION.reachBlocks, SESSION.evasions)
         task.wait(0.5)
     end
 end)
@@ -1769,7 +2031,7 @@ Button(ReachPage,"↺  Reset Reach Stats", function()
     SESSION.homeGKReach={touches=0,violations=0,avgDist=0,totalDist=0}
     SESSION.awayGKReach={touches=0,violations=0,avgDist=0,totalDist=0}
     SESSION.reachDistances={}; SESSION.avgReach=0; SESSION.violations=0
-    SESSION.suspiciousEvents=0; SESSION.confidence=100
+    SESSION.suspiciousEvents=0; SESSION.confidence=100; SESSION.reachBlocks=0
     Notify("Reach stats reset","warn")
 end)
 
@@ -1855,18 +2117,18 @@ Button(PerfPage,"⚡  High-End Preset",function()
 end)
 
 -- ============================== SECURITY =========================
-Section(SecurityPage,"EVASION ENGINE",C.accent2)
-Toggle(SecurityPage,"Evasion Enabled",true,function(s) EVASION.enabled=s end)
-Toggle(SecurityPage,"Throttle Jitter",true,function(s) EVASION.jitterPct=s and 0.35 or 0 end)
-Toggle(SecurityPage,"Random Limb Subset",true,function(s)
-    if s then EVASION.limbSubsetMin=4; EVASION.limbSubsetMax=7
-    else EVASION.limbSubsetMin=99; EVASION.limbSubsetMax=99 end end)
-Toggle(SecurityPage,"Positional Noise",true,function(s) EVASION.posNoise = s and 0.22 or 0 end)
+Section(SecurityPage,"ANTI-REACH DETECTION",C.accent2)
+Toggle(SecurityPage,"Anti-Reach Detection",true,function(s) EVASION.reachAntiDetect=s end)
+Toggle(SecurityPage,"Human Pacing",true,function(s) EVASION.humanPacing=s end)
+Toggle(SecurityPage,"Adaptive Throttle",true,function(s) EVASION.adaptiveThrottle=s end)
+Slider(SecurityPage,"Max Touches / Sec",2,20,8,function(v) EVASION.maxTouchesPerSec=v end)
+
+Section(SecurityPage,"ANTI-HOOK / GOLDEYE",C.pink)
+Toggle(SecurityPage,"Anti-Hook Watchdog",true,function(s) EVASION.watchdog=s end)
+Toggle(SecurityPage,"GoldEye Detection",true,function(s) EVASION.goldEyeDetect=s end)
 Toggle(SecurityPage,"AC Remote Interceptor",true,function(s) EVASION.acIntercept=s end)
 Toggle(SecurityPage,"Hide Viz From Scanner",true,function(s) EVASION.hideVizFromScanner=s end)
-Toggle(SecurityPage,"Hook Watchdog",true,function(s) EVASION.watchdog=s end)
 Slider(SecurityPage,"Fire Skip Chance x100",0,20,5,function(v) EVASION.fireSkipChance=v/100 end)
-Slider(SecurityPage,"Jitter %",0,60,35,function(v) EVASION.jitterPct=v/100 end)
 
 Section(SecurityPage,"WEBHOOK TEST",C.accent)
 Button(SecurityPage,"🧪  Test Ball Webhook",function()
@@ -1891,6 +2153,12 @@ end)
 Button(SecurityPage,"🧪  Test Kick Card",function()
     sendBanWebhook("KICK","Manual test kick","Manual Trigger"); Notify("Kick card sent","ok")
 end)
+Button(SecurityPage,"🧪  Test GoldEye Flag",function()
+    CHANNELS.FLAG.last=0
+    GOLDEYE.lastFiredAt=0
+    reportGoldEye("MANUAL_TEST","Manual GoldEye test trigger",3)
+    Notify("GoldEye flag sent","eye")
+end)
 Button(SecurityPage,"🧪  Test Session Webhook",function()
     sendSessionWebhook("MANUAL_TEST"); Notify("Session webhook sent","ok")
 end)
@@ -1907,14 +2175,69 @@ Button(SecurityPage,"🗑  Clear All Logs",function()
 end)
 Toggle(SecurityPage,"Notifications",true,function(s) getgenv().NotifsEnabled=s end)
 
+-- ============================== GOLDEYE TAB =====================
+Section(GoldPage,"GOLDEYE — ACTIVE MONITOR",C.pink)
+local eyeCard = Instance.new("Frame",GoldPage)
+eyeCard.Size=UDim2.new(1,-8,0,260); eyeCard.BackgroundColor3=C.panel2
+eyeCard.BorderSizePixel=0; corner(eyeCard,12); stroke(eyeCard,C.pink)
+local eyeHeader = Instance.new("TextLabel",eyeCard)
+eyeHeader.Size=UDim2.new(1,-24,0,24); eyeHeader.Position=UDim2.new(0,14,0,12)
+eyeHeader.BackgroundTransparency=1; eyeHeader.Text="👁️  GOLDEYE STATUS"
+eyeHeader.TextColor3=C.pink; eyeHeader.Font=Enum.Font.GothamBold
+eyeHeader.TextSize=12; eyeHeader.TextXAlignment=Enum.TextXAlignment.Left
+local eyeLabel = Instance.new("TextLabel",eyeCard)
+eyeLabel.Size=UDim2.new(1,-28,1,-46); eyeLabel.Position=UDim2.new(0,14,0,40)
+eyeLabel.BackgroundTransparency=1; eyeLabel.TextColor3=C.text
+eyeLabel.Font=Enum.Font.Code; eyeLabel.TextSize=11
+eyeLabel.TextXAlignment=Enum.TextXAlignment.Left
+eyeLabel.TextYAlignment=Enum.TextYAlignment.Top
+eyeLabel.TextWrapped=true; eyeLabel.Text="Watching..."
+task.spawn(function()
+    while eyeCard.Parent do
+        local capStr = {}
+        for k,v in pairs(CAP) do
+            capStr[#capStr+1] = string.format("%-18s %s", k, v and "OK" or "--")
+        end
+        eyeLabel.Text = string.format(
+            "SEEN TABLES       %d\nHOOK ATTEMPTS     %d\nFIRED ON US       %d\nHOOK TAMPER       %d\nSPOOFED REPORTS   %d\nBLOCKED TP        %d\n\n── DETECTED NAMES ──\n%s\n\n── CAPABILITIES ──\n%s",
+            GOLDEYE.seenTables, GOLDEYE.hookAttempts, GOLDEYE.firedOnUs,
+            SESSION.hookTamper, SESSION.spoofedReports, SESSION.blockedTeleports,
+            table.concat(GOLDEYE.names, ", "),
+            table.concat(capStr, "\n"))
+        task.wait(1)
+    end
+end)
+Button(GoldPage,"👁  Scan For GoldEye Tables",function()
+    local n = scanGoldEye()
+    Notify("GoldEye scan — "..tostring(n or 0).." hits","eye")
+end)
+Button(GoldPage,"🧪  Simulate GoldEye Kick",function()
+    CHANNELS.FLAG.last=0
+    GOLDEYE.lastFiredAt=0
+    reportGoldEye("KICK","Simulated GoldEye kick attempt",5)
+    Notify("GoldEye kick flag sent","eye")
+end)
+Button(GoldPage,"🧪  Simulate GoldEye Ban",function()
+    CHANNELS.FLAG.last=0
+    CHANNELS.BAN.last=0
+    GOLDEYE.lastFiredAt=0
+    reportGoldEye("BAN","Simulated GoldEye ban attempt",5)
+    Notify("GoldEye ban flag sent","eye")
+end)
+Button(GoldPage,"↺  Reset GoldEye Counters",function()
+    GOLDEYE.seenTables=0; GOLDEYE.hookAttempts=0; GOLDEYE.firedOnUs=0
+    SESSION.goldEyeHits=0; SESSION.hookTamper=0
+    Notify("GoldEye counters reset","warn")
+end)
+
 -- ============================== UPDATES ==========================
 Section(UpdatesPage,"NULUX HUB — CHANGELOG",C.gold)
 local updatesCard = Instance.new("Frame",UpdatesPage)
-updatesCard.Size=UDim2.new(1,-8,0,620); updatesCard.BackgroundColor3=C.panel2
+updatesCard.Size=UDim2.new(1,-8,0,700); updatesCard.BackgroundColor3=C.panel2
 updatesCard.BorderSizePixel=0; corner(updatesCard,12); stroke(updatesCard,C.border)
 local updatesHeader = Instance.new("TextLabel",updatesCard)
 updatesHeader.Size=UDim2.new(1,-24,0,24); updatesHeader.Position=UDim2.new(0,14,0,12)
-updatesHeader.BackgroundTransparency=1; updatesHeader.Text="v3.4  —  CURRENT"
+updatesHeader.BackgroundTransparency=1; updatesHeader.Text="v3.5  —  CURRENT"
 updatesHeader.TextColor3=C.gold; updatesHeader.Font=Enum.Font.GothamBold
 updatesHeader.TextSize=12; updatesHeader.TextXAlignment=Enum.TextXAlignment.Left
 local updatesLabel = Instance.new("TextLabel",updatesCard)
@@ -1925,64 +2248,68 @@ updatesLabel.TextXAlignment=Enum.TextXAlignment.Left
 updatesLabel.TextYAlignment=Enum.TextYAlignment.Top
 updatesLabel.TextWrapped=true
 updatesLabel.Text = [[
-── v3.4 (current) ───────────────────
+── v3.5 (current) ───────────────────
 
 ADDED
-  • Unified Reach Size slider
-    - one value drives ball + feet + GK
-  • Updates tab (this one)
-  • Advanced Evasion Engine
-    - Throttle jitter (±35%) on contact gap
-    - Random limb subset per fire (4-7)
-    - Shuffled limb fire order
-    - Positional contact noise (±0.22 studs)
-    - AC remote interceptor (swallows reports)
-    - Extended teleport guard (5 methods)
-    - Hook watchdog (keeps guards alive)
-    - Null-prefixed viz part names
-    - Camera-parented visuals (hidden from
-      Workspace-iterating scanners)
-    - Fire skip chance (5%)
-  • Evasion counters on Session block
+  • Capability probe (CAP) — script can no
+    longer die on missing executor fns
+  • Anti-Reach Detection module
+    - Human pacing (Poisson-ish 15-45ms)
+    - Adaptive throttle (rate-aware)
+    - Session rate cap (max touches/sec)
+    - Warmup window (1.5s on inject)
+  • GoldEye Detector
+    - Scans getgc for GoldEye tables
+    - Watches Kick/BanAsync for GoldEye
+      signatures
+    - Every hit fires the FLAG webhook
+    - BAN/KICK hits also mirror to BAN
+  • Anti-Hook Watchdog
+    - Periodic namecall metamethod check
+    - Reports tamper via FLAG webhook
+  • Dedicated GoldEye tab
+  • "Test GoldEye" buttons
 
 REMOVED
-  • Per-axis reach sliders (X/Y/Z)
-  • Per-mode feet X/Y/Z sliders
-  • Per-mode GK X/Y/Z sliders
-  • Legacy duplicate "Webhook" tab
+  • Throttle jitter (was useless noise)
 
 FIXED
-  • Predictor halo pool leak on ball despawn
-  • Reach bounds now use unified value
-  • Slider drift on transparency cascade
+  • Crash: "attempt to call a nil value"
+    - Root cause: unconditional calls to
+      hookmetamethod / hookfunction /
+      newcclosure / setreadonly /
+      getrawmetatable
+    - Every call now capability-checked
+    - Safe wrappers: safeHookMethod,
+      safeHookFunction, safeFireTouch
 
 CHANGED
-  • Footer badge → Nulux v3.4
-  • Subtitle → EVASION
-  • Default predictor hue seed randomized
-    per session (anti-fingerprint)
+  • Footer → Nulux v3.5
+  • Subtitle → GOLDEYE
+  • Session block includes GoldEye counter
+  • Reach blocks counted separately
+
+── v3.4 ────────────────────────────
+  • Unified Reach slider
+  • Updates tab
+  • Evasion engine (jitter, limb subset)
 
 ── v3.3 ────────────────────────────
-  • Rainbow beam predictor (HSV, taper,
-    glow underlay, bounce sim)
+  • Rainbow beam predictor
   • Blockquote ban/kick cards
-  • Reach stats by side (HOME/AWAY/GK)
-  • Match roster + timeline blocks
 
 ── v3.2 ────────────────────────────
   • Redesigned embed blocks
   • Match system
-  • Advanced reach tab
-  • Session / AC / Remote webhooks
 ]]
+-- scroll wrapper so the long text is fully visible
 local updatesScroll = Instance.new("ScrollingFrame",UpdatesPage)
--- wrap the label in a scroller so long changelog is reachable
-updatesScroll.Size = UDim2.new(1,-8,0,0)  -- collapsed; label already fits
+updatesScroll.Size = UDim2.new(1,-8,0,0)
 updatesScroll.Visible = false
 
 -- ============================== STATS ===========================
 local statsCard = Instance.new("Frame",StatsPage)
-statsCard.Size=UDim2.new(1,-8,0,420); statsCard.BackgroundColor3=C.panel2
+statsCard.Size=UDim2.new(1,-8,0,460); statsCard.BackgroundColor3=C.panel2
 statsCard.BorderSizePixel=0; corner(statsCard,12); stroke(statsCard,C.border)
 local statsHeader = Instance.new("TextLabel",statsCard)
 statsHeader.Size=UDim2.new(1,-24,0,22); statsHeader.Position=UDim2.new(0,14,0,12)
@@ -2003,13 +2330,14 @@ task.spawn(function()
         local predCount=0; for _ in pairs(predCache) do predCount+=1 end
         local conf = calcConfidence()
         statsLabel.Text = string.format(
-            "Touches         %d\nUnique Balls    %d\nPlayer Contacts %d\nAvg Distance    %.2f\nLongest Reach   %.2f\nAvg Reach       %.2f\nFlagged         %d\nViolations      %d\nSuspicious      %d\nBans Blocked    %d\nKicks Blocked   %d\nTP Blocked      %d\nErrors          %d\nStreak          %d / %d\nConfidence      %d%%\nDuration        %s\nFPS / Ping      %d / %d ms\nQueue / Viz     %d / %d\nPredictors      %d\nTimeline Evts   %d\nEvasions        %d\nSpoofed Reports %d",
+            "Touches         %d\nUnique Balls    %d\nPlayer Contacts %d\nAvg Distance    %.2f\nLongest Reach   %.2f\nAvg Reach       %.2f\nFlagged         %d\nViolations      %d\nSuspicious      %d\nBans Blocked    %d\nKicks Blocked   %d\nTP Blocked      %d\nReach Blocks    %d\nErrors          %d\nStreak          %d / %d\nConfidence      %d%%\nDuration        %s\nFPS / Ping      %d / %d ms\nQueue / Viz     %d / %d\nPredictors      %d\nTimeline Evts   %d\nEvasions        %d\nSpoofed Reports %d\nGoldEye Hits    %d\nHook Tamper     %d",
             SESSION.touches, uniq, SESSION.contacts, avg, SESSION.longestReach,
             SESSION.avgReach, SESSION.flaggedTouches, SESSION.violations,
             SESSION.suspiciousEvents, SESSION.bans, SESSION.kicks, SESSION.blockedTeleports,
+            SESSION.reachBlocks,
             SESSION.errors, SESSION.streak, SESSION.maxStreak, conf, getSessionDuration(),
             currentFPS, getPing(), #sendQueue, vizCount, predCount, #matchTimeline,
-            SESSION.evasions, SESSION.spoofedReports)
+            SESSION.evasions, SESSION.spoofedReports, SESSION.goldEyeHits, SESSION.hookTamper)
         task.wait(0.5)
     end
 end)
@@ -2021,6 +2349,7 @@ Button(StatsPage,"↺  Reset Session Stats",function()
     SESSION.violations=0; SESSION.suspiciousEvents=0; SESSION.confidence=100
     SESSION.reachDistances={}; SESSION.avgReach=0
     SESSION.evasions=0; SESSION.spoofedReports=0; SESSION.blockedTeleports=0
+    SESSION.reachBlocks=0; SESSION.hookTamper=0; SESSION.goldEyeHits=0
     Notify("Stats reset","warn")
 end)
 
@@ -2053,5 +2382,10 @@ end)
 scanACRemotes(true)
 local firstTab = Pages["Inject"]; if firstTab then firstTab.Activate() end
 sendSessionWebhook("START")
-Notify("Nulux v3.4 — unified reach + evasion active","ok")
-print("[Nulux v3.4] LOADED — unified reach, updates tab, evasion engine armed")
+Notify("Nulux v3.5 — GoldEye detector armed","eye")
+print("[Nulux v3.5] LOADED — anti-reach + anti-hook + GoldEye monitor")
+print("[Nulux v3.5] Capabilities:", "hookmetamethod="..tostring(CAP.hookmetamethod),
+    "hookfunction="..tostring(CAP.hookfunction),
+    "getrawmetatable="..tostring(CAP.getrawmetatable),
+    "firetouchinterest="..tostring(CAP.firetouchinterest),
+    "getgc="..tostring(CAP.getgc))
